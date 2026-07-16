@@ -42,7 +42,7 @@
 
 1. 저장소를 로컬 PC로 클론(Clone)합니다.
    ```bash
-   git clone [https://github.com/사용자명/figma_PPT_Baker.git](https://github.com/사용자명/figma_PPT_Baker.git)
+   git clone https://github.com/jha2ee/figma_PPT_Baker.git
    cd figma_PPT_Baker
    ```
 
