@@ -1,0 +1,324 @@
+<script src="https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+<style>
+  body {
+    font-family: sans-serif;
+    padding: 16px;
+    background: #f5f5f5;
+    margin: 0;
+    box-sizing: border-box;
+    height: 650px;
+    overflow: hidden;
+  }
+
+  .layout-container {
+    display: flex;
+    gap: 16px;
+    height: 100%;
+    align-items: stretch;
+  }
+
+  .column-left {
+    flex: 4.2;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .column-right {
+    flex: 5.8;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+
+  .panel {
+    background: white;
+    padding: 12px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    margin-bottom: 12px;
+  }
+
+  .panel:last-child {
+    margin-bottom: 0;
+  }
+
+  .panel-title {
+    font-size: 11px;
+    font-weight: bold;
+    color: #555;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+
+  .left-fill-panel {
+    background: white;
+    padding: 12px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    height: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #frame-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    background: #fafafa;
+  }
+
+  .frame-item {
+    display: flex;
+    align-items: center;
+    background: white;
+    border-bottom: 1px solid #eee;
+    padding: 8px 10px;
+    font-size: 12px;
+    cursor: grab;
+  }
+
+  .frame-item:last-child {
+    border-bottom: none;
+  }
+
+  input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  #exportBtn {
+    width: 100%;
+    padding: 12px;
+    background: #0D99FF;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  #exportBtn:hover {
+    background: #007BE5;
+  }
+
+  #exportBtn:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+  }
+
+  #status {
+    margin-top: 8px;
+    font-size: 11px;
+    color: #666;
+    text-align: center;
+    font-weight: bold;
+  }
+
+  #progress-container {
+    width: 100%;
+    height: 6px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    margin-top: 6px;
+    overflow: hidden;
+    display: none;
+  }
+
+  #progress-bar {
+    width: 0%;
+    height: 100%;
+    background: #0D99FF;
+    transition: width 0.3s ease-out;
+  }
+
+  .info-box {
+    margin-top: 12px;
+    padding: 12px;
+    background: #E5F4FF;
+    border-radius: 6px;
+    border: 1px solid #BEE3FF;
+  }
+
+  .info-box-title {
+    font-size: 11px;
+    font-weight: bold;
+    color: #007BE5;
+    margin-bottom: 6px;
+  }
+
+  .info-box ul {
+    font-size: 10.5px;
+    color: #444;
+    margin: 0;
+    padding-left: 16px;
+    line-height: 1.55;
+  }
+</style>
+
+<div class="layout-container">
+  <div class="column-left">
+    <div class="left-fill-panel">
+      <div class="panel-title">1. 선택된 화면 순서 (드래그로 정렬순서 변경)</div>
+      <ul id="frame-list">
+        <li style="padding: 10px; color: #999; text-align: center; margin-top: 250px;">프레임을 선택해주세요.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="column-right">
+    <div class="panel">
+      <div class="panel-title">2. 본문 이미지 통합 기준 레이어 이름</div>
+      <input type="text" id="opt-boundary-names" value="panel, container" placeholder="예: panel, container">
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">3. 항상 텍스트로 개별 분리할 레이어 이름</div>
+      <input type="text" id="opt-text-keywords" value="desc_, description" placeholder="예: description">
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">4. 항상 이미지로 단독 추출할 레이어 이름</div>
+      <input type="text" id="opt-image-keywords" value="numbering" placeholder="예: numbering, icon">
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">5. 저장할 파일 이름</div>
+      <input type="text" id="opt-file-name" placeholder="파일명 입력">
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">6. 2번에서 입력한 항목 중첩 배경 처리 옵션</div>
+      <label style="font-size: 12px; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+        <input type="checkbox" id="opt-extract-nested" checked>
+        하위 레이어를 개별 이미지로 분리하기
+      </label>
+      <div style="font-size: 10.5px; color: #777; margin-top: 4px; padding-left: 20px;">
+        * 체크 해제 시: 내부의 모든 도형을 하나의 통이미지로 병합하여 굽습니다.
+      </div>
+    </div>
+
+    <button id="exportBtn" disabled>PPTX 변환 시작</button>
+    <button id="exportBtn" disabled>PPTX 변환 시작</button>
+
+    <div id="status">대기 중...</div>
+    <div id="progress-container">
+      <div id="progress-bar"></div>
+    </div>
+
+    <div class="info-box">
+      <div class="info-box-title">💡 맞춤형 가이드 안내</div>
+      <ul>
+        <li><b>키워드 매칭 규칙:</b> 지정한 단어와 완벽히 일치하지 않아도, 레이어 이름에 <strong>해당 키워드가 포함</strong>되어 있으면 전부 자동으로 찾아내어 적용합니다.
+          <br />(예: <code
+            style="background:#fff; padding:1px 4px; border-radius:3px; border:1px solid #BEE3FF;">panel</code> 입력 시
+          <code style="color:#007BE5;">panel_공통</code>, <code style="color:#007BE5;">main_panel</code> 모두 매칭)</li>
+        <li>상기 입력한 <strong>텍스트 지정 키워드</strong>와 <strong>이미지 지정 키워드</strong>는 레이어 깊이와 무관하게 최우선 적용됩니다.</li>
+        <li>레이어 이름은 쉼표로 구분하며, 대소문자를 구분하지 않습니다.</li>
+        <li>아이콘 폰트는 깨짐 방지를 위해 자동으로 모두 <strong>이미지화</strong> 처리됩니다.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentFrames = []; let dragStartIndex = -1; let customFileName = 'Figma_to_PPT';
+  function renderFrameList() {
+    const listEl = document.getElementById('frame-list'); const btn = document.getElementById('exportBtn');
+    listEl.innerHTML = ''; if (currentFrames.length === 0) { listEl.innerHTML = '<li style="padding: 10px; color: #999; text-align: center; margin-top: 250px;">프레임을 선택해주세요.</li>'; btn.disabled = true; return; }
+    btn.disabled = false;
+    currentFrames.forEach((frame, index) => {
+      const li = document.createElement('li'); li.className = 'frame-item'; li.draggable = true; li.innerHTML = `<span>≡ ${frame.name}</span>`;
+      li.addEventListener('dragstart', () => { dragStartIndex = index; });
+      li.addEventListener('dragover', (e) => e.preventDefault());
+      li.addEventListener('drop', () => { if (dragStartIndex !== index) { const item = currentFrames.splice(dragStartIndex, 1)[0]; currentFrames.splice(index, 0, item); renderFrameList(); } });
+      listEl.appendChild(li);
+    });
+  }
+
+  window.onmessage = async (event) => {
+    const msg = event.data.pluginMessage;
+    if (msg.type === 'selection-changed') { currentFrames = msg.frames; renderFrameList(); if (currentFrames.length > 0) document.getElementById('opt-file-name').value = currentFrames[0].name; }
+    if (msg.type === 'update-progress') { document.getElementById('progress-container').style.display = 'block'; document.getElementById('progress-bar').style.width = (msg.current / msg.total * 100) + '%'; document.getElementById('status').innerText = msg.frameName + ' 분석 중...'; }
+
+    if (msg.type === 'generate-pptx') {
+      let pptx = new PptxGenJS(); const bufferToBase64 = (b) => new Promise(r => { const reader = new FileReader(); reader.onload = () => r(reader.result); reader.readAsDataURL(new Blob([b])); });
+      const first = msg.slides[0]; pptx.defineLayout({ name: 'F', width: first.width / 96, height: first.height / 96 }); pptx.layout = 'F';
+
+      for (let i = 0; i < msg.slides.length; i++) {
+        const sData = msg.slides[i]; pptx.defineLayout({ name: 'L' + i, width: sData.width / 96, height: sData.height / 96 });
+        let slide = pptx.addSlide({ layout: 'L' + i });
+        for (const el of sData.elements) {
+          if (el.type === 'image') {
+            slide.addImage({ data: await bufferToBase64(el.bytes), x: el.x + '%', y: el.y + '%', w: el.w + '%', h: el.h + '%' });
+          } else {
+            let finalX = el.x; let finalW = el.w;
+            if (!el.autoWrap) {
+              const widthBuffer = 2.5;
+              finalW = el.w + widthBuffer;
+
+              if (el.align === 'center') {
+                finalX = el.x - (widthBuffer / 2);
+              } else if (el.align === 'right') {
+                finalX = el.x - widthBuffer;
+              }
+            }
+
+            // [마스터 패치] 글자별 스타일 정보가 담긴 el.textChunks 배열 데이터를 직접 바인딩하여 
+            // PPT 상자 하나 안에 부분 색상과 부분 굵기가 완벽하게 조화되도록 렌더링을 위임합니다.
+            slide.addText(el.textChunks, {
+              x: finalX + '%',
+              y: el.y + '%',
+              w: finalW + '%',
+              h: el.h + '%',
+              align: el.align,
+              valign: el.valign,
+              wrap: el.autoWrap,
+              margin: [0, 0, 0, 0],
+              paraSpaceBefore: 0,
+              paraSpaceAfter: 0,
+              //lineSpacingMultiple: el.lhMultiple,
+            });
+          }
+        }
+      }
+      const name = document.getElementById('opt-file-name').value || 'Export';
+      await pptx.writeFile({ fileName: name.endsWith('.pptx') ? name : name + '.pptx' });
+      document.getElementById('status').innerText = '변환 완료! 🎉'; document.getElementById('progress-container').style.display = 'none'; document.getElementById('exportBtn').disabled = false;
+    }
+  };
+
+  document.getElementById('exportBtn').onclick = () => {
+    document.getElementById('exportBtn').disabled = true;
+    document.getElementById('progress-container').style.display = 'block';
+    document.getElementById('progress-bar').style.width = '5%';
+    document.getElementById('status').innerText = '디자인을 분석할 준비를 하고 있습니다...';
+
+    const boundaryNames = document.getElementById('opt-boundary-names').value.split(',');
+    const textKeywords = document.getElementById('opt-text-keywords').value.split(',');
+    const imageKeywords = document.getElementById('opt-image-keywords').value.split(',');
+    const extractNested = document.getElementById('opt-extract-nested').checked;
+
+    parent.postMessage({
+      pluginMessage: {
+        type: 'export-ppt',
+        orderedIds: currentFrames.map(f => f.id),
+        boundaryNames: boundaryNames,
+        textKeywords: textKeywords,
+        imageKeywords: imageKeywords,
+        extractNested: extractNested
+      }
+    }, '*');
+  };
+</script>
