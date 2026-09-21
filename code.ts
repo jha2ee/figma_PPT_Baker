@@ -39,24 +39,6 @@ function checkIsBakedBoundary(node: any, boundaries: string[]): boolean {
   const name = node.name.toLowerCase().trim();
   return boundaries.some((b: string) => name.includes(b));
 }
-/* 
-function checkIsBakedBoundary(node: any, boundaries: string[]): boolean {
-  if (!node || !node.name) return false;
-  const name = node.name.toLowerCase().trim();
-  const isBoundary = boundaries.some((b: string) => name.includes(b));
-  if (!isBoundary) return false;
-  if ('findAll' in node) {
-    const hasInnerBoundary = node.findAll((inner: any) => {
-      if (inner === node) return false;
-      const iName = inner.name.toLowerCase().trim();
-      return boundaries.some((b: string) => iName.includes(b));
-    }).length > 0;
-    if (hasInnerBoundary) return false;
-  }
-  return true;
-}
-*/
-
 figma.ui.onmessage = async (msg) => {
   if (msg.type === 'export-ppt') {
     const { orderedIds, boundaryNames, textKeywords, imageKeywords, extractNested } = msg;
@@ -130,43 +112,6 @@ figma.ui.onmessage = async (msg) => {
       }) as TextNode[];
 
       const targetImageNodes: SceneNode[] = [];
-
-      /* function collectImages(node: SceneNode, hasCapturedParent: boolean) {
-        if (!isNodeVisible(node, frame)) return;
-        
-        const isFontAwesomeText = node.type === 'TEXT' && 
-                                  (node as TextNode).fontName !== figma.mixed && 
-                                  ((node as TextNode).fontName as FontName).family.includes('Font Awesome');
-
-        if (node.type === 'TEXT' && targetTextNodes.includes(node as TextNode)) return;
-
-        const name = node.name.toLowerCase().trim();
-        const isCustomImageKey = imageKeys.some((k: string) => name.includes(k));
-
-        if (isCustomImageKey || isFontAwesomeText) {
-          if (!targetImageNodes.includes(node)) targetImageNodes.push(node);
-          return;
-        }
-
-        if (checkIsBakedBoundary(node, boundaries)) {
-          if (!targetImageNodes.includes(node)) targetImageNodes.push(node);
-          return;
-        }
-
-        let isCaptured = false;
-        if ('children' in node && node.type !== 'BOOLEAN_OPERATION') {
-          if (hasVisibleGraphic(node) || node.type === 'INSTANCE' || node.type === 'COMPONENT') {
-            if (!targetImageNodes.includes(node)) { targetImageNodes.push(node); isCaptured = true; }
-          }
-          for (const child of node.children) { collectImages(child, hasCapturedParent || isCaptured); }
-        } else {
-          if (!hasCapturedParent) {
-            if (hasVisibleGraphic(node) || node.type === 'BOOLEAN_OPERATION') {
-              if (!targetImageNodes.includes(node)) { targetImageNodes.push(node); }
-            }
-          }
-        }
-      } */
 
       function collectImages(node: SceneNode, hasCapturedParent: boolean) {
         if (!isNodeVisible(node, frame)) return;
@@ -271,12 +216,6 @@ figma.ui.onmessage = async (msg) => {
 
         const hasNewLine = node.characters.includes('\n');
         let autoWrap = node.textAutoResize !== 'WIDTH_AND_HEIGHT';
-
-        // if (!hasNewLine && node.characters.length <= 35) {
-        //   autoWrap = false;
-        // } else if (hasNewLine) {
-        //   autoWrap = true;
-        // }
 
         let align = 'left';
         if (node.textAlignHorizontal === 'CENTER') align = 'center';

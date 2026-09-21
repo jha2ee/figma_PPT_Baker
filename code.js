@@ -38,24 +38,11 @@ function checkIsBakedBoundary(node, boundaries) {
     if (!node || !node.name)
         return false;
     const name = node.name.toLowerCase().trim();
-    const isBoundary = boundaries.some((b) => name.includes(b));
-    if (!isBoundary)
-        return false;
-    if ('findAll' in node) {
-        const hasInnerBoundary = node.findAll((inner) => {
-            if (inner === node)
-                return false;
-            const iName = inner.name.toLowerCase().trim();
-            return boundaries.some((b) => iName.includes(b));
-        }).length > 0;
-        if (hasInnerBoundary)
-            return false;
-    }
-    return true;
+    return boundaries.some((b) => name.includes(b));
 }
 figma.ui.onmessage = async (msg) => {
     if (msg.type === 'export-ppt') {
-        const { orderedIds, boundaryNames, textKeywords, imageKeywords } = msg;
+        const { orderedIds, boundaryNames, textKeywords, imageKeywords, extractNested } = msg;
         const boundaries = boundaryNames.map((b) => b.trim().toLowerCase()).filter(Boolean);
         const textKeys = textKeywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
         const imageKeys = imageKeywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
@@ -76,6 +63,15 @@ figma.ui.onmessage = async (msg) => {
             const frame = frames[i];
             figma.ui.postMessage({ type: 'update-progress', current: i + 1, total: frames.length, frameName: frame.name });
             await new Promise(r => setTimeout(r, 10));
+            let backgroundColor = null;
+            if (Array.isArray(frame.fills)) {
+                for (const fill of frame.fills) {
+                    if (fill.visible !== false && fill.type === 'SOLID' && (fill.opacity === undefined || fill.opacity > 0)) {
+                        const toHex = (c) => { const hex = Math.round(c * 255).toString(16); return hex.length === 1 ? '0' + hex : hex; };
+                        backgroundColor = (toHex(fill.color.r) + toHex(fill.color.g) + toHex(fill.color.b)).toUpperCase();
+                    }
+                }
+            }
             const frameBox = frame.absoluteBoundingBox ?? { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
             let currentZIndex = 0;
             const zIndexMap = new Map();
@@ -125,30 +121,38 @@ figma.ui.onmessage = async (msg) => {
                     return;
                 const name = node.name.toLowerCase().trim();
                 const isCustomImageKey = imageKeys.some((k) => name.includes(k));
+                const isBakedBoundary = checkIsBakedBoundary(node, boundaries);
+                let isCapturedHere = false;
+                // 1. 단독 이미지 키워드 (numbering 등) 
                 if (isCustomImageKey || isFontAwesomeText) {
                     if (!targetImageNodes.includes(node))
                         targetImageNodes.push(node);
-                    return;
+                    isCapturedHere = true;
                 }
-                if (checkIsBakedBoundary(node, boundaries)) {
+                // 2. 통이미지 컨테이너 키워드 (panel, container 등)
+                else if (isBakedBoundary) {
                     if (!targetImageNodes.includes(node))
                         targetImageNodes.push(node);
-                    return;
+                    isCapturedHere = true;
+                    if (!extractNested)
+                        return;
                 }
-                let isCaptured = false;
+                // 3. 자식 레이어들 재귀 탐색
                 if ('children' in node && node.type !== 'BOOLEAN_OPERATION') {
-                    if (hasVisibleGraphic(node) || node.type === 'INSTANCE' || node.type === 'COMPONENT') {
-                        if (!targetImageNodes.includes(node)) {
-                            targetImageNodes.push(node);
-                            isCaptured = true;
+                    if (!isCapturedHere && !hasCapturedParent) {
+                        if (hasVisibleGraphic(node) || node.type === 'INSTANCE' || node.type === 'COMPONENT') {
+                            if (!targetImageNodes.includes(node)) {
+                                targetImageNodes.push(node);
+                                isCapturedHere = true;
+                            }
                         }
                     }
                     for (const child of node.children) {
-                        collectImages(child, hasCapturedParent || isCaptured);
+                        collectImages(child, hasCapturedParent || isCapturedHere);
                     }
                 }
                 else {
-                    if (!hasCapturedParent) {
+                    if (!hasCapturedParent && !isCapturedHere) {
                         if (hasVisibleGraphic(node) || node.type === 'BOOLEAN_OPERATION') {
                             if (!targetImageNodes.includes(node)) {
                                 targetImageNodes.push(node);
@@ -226,12 +230,6 @@ figma.ui.onmessage = async (msg) => {
                 }
                 const hasNewLine = node.characters.includes('\n');
                 let autoWrap = node.textAutoResize !== 'WIDTH_AND_HEIGHT';
-                if (!hasNewLine && node.characters.length <= 35) {
-                    autoWrap = false;
-                }
-                else if (hasNewLine) {
-                    autoWrap = true;
-                }
                 let align = 'left';
                 if (node.textAlignHorizontal === 'CENTER')
                     align = 'center';
@@ -320,7 +318,7 @@ figma.ui.onmessage = async (msg) => {
                 });
             }
             elementsData.sort((a, b) => a.zIndex - b.zIndex);
-            slidesData.push({ name: frame.name, width: frame.width, height: frame.height, elements: elementsData });
+            slidesData.push({ name: frame.name, width: frame.width, height: frame.height, backgroundColor: backgroundColor, elements: elementsData });
         }
         figma.ui.postMessage({ type: 'generate-pptx', slides: slidesData });
     }
