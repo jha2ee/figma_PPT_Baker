@@ -210,7 +210,6 @@
     </div>
 
     <button id="exportBtn" disabled>PPTX 변환 시작</button>
-    <button id="exportBtn" disabled>PPTX 변환 시작</button>
 
     <div id="status">대기 중...</div>
     <div id="progress-container">
@@ -259,6 +258,9 @@
       for (let i = 0; i < msg.slides.length; i++) {
         const sData = msg.slides[i]; pptx.defineLayout({ name: 'L' + i, width: sData.width / 96, height: sData.height / 96 });
         let slide = pptx.addSlide({ layout: 'L' + i });
+        if (sData.backgroundColor) {
+          slide.background = { fill: sData.backgroundColor };
+        }
         for (const el of sData.elements) {
           if (el.type === 'image') {
             slide.addImage({ data: await bufferToBase64(el.bytes), x: el.x + '%', y: el.y + '%', w: el.w + '%', h: el.h + '%' });

@@ -86,6 +86,16 @@ figma.ui.onmessage = async (msg) => {
       figma.ui.postMessage({ type: 'update-progress', current: i + 1, total: frames.length, frameName: frame.name });
       await new Promise(r => setTimeout(r, 10));
 
+      let backgroundColor: string | null = null;
+      if (Array.isArray(frame.fills)) {
+        for (const fill of frame.fills) {
+          if (fill.visible !== false && fill.type === 'SOLID' && (fill.opacity === undefined || fill.opacity > 0)) {
+            const toHex = (c: number) => { const hex = Math.round(c * 255).toString(16); return hex.length === 1 ? '0' + hex : hex; };
+            backgroundColor = (toHex(fill.color.r) + toHex(fill.color.g) + toHex(fill.color.b)).toUpperCase();
+          }
+        }
+      }
+
       const frameBox = frame.absoluteBoundingBox ?? { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
 
       let currentZIndex = 0;
@@ -262,11 +272,11 @@ figma.ui.onmessage = async (msg) => {
         const hasNewLine = node.characters.includes('\n');
         let autoWrap = node.textAutoResize !== 'WIDTH_AND_HEIGHT';
 
-        if (!hasNewLine && node.characters.length <= 35) {
-          autoWrap = false;
-        } else if (hasNewLine) {
-          autoWrap = true;
-        }
+        // if (!hasNewLine && node.characters.length <= 35) {
+        //   autoWrap = false;
+        // } else if (hasNewLine) {
+        //   autoWrap = true;
+        // }
 
         let align = 'left';
         if (node.textAlignHorizontal === 'CENTER') align = 'center';
@@ -358,7 +368,7 @@ figma.ui.onmessage = async (msg) => {
         });
       }
       elementsData.sort((a, b) => a.zIndex - b.zIndex);
-      slidesData.push({ name: frame.name, width: frame.width, height: frame.height, elements: elementsData });
+      slidesData.push({ name: frame.name, width: frame.width, height: frame.height, backgroundColor: backgroundColor, elements: elementsData });
     }
     figma.ui.postMessage({ type: 'generate-pptx', slides: slidesData });
   }
