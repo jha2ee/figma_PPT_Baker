@@ -424,6 +424,7 @@ figma.ui.onmessage = async (msg) => {
             elementsData.sort((a, b) => a.zIndex - b.zIndex);
             slidesData.push({ name: frame.name, width: frame.width, height: frame.height, backgroundColor: backgroundColor, elements: elementsData });
         }
-        figma.ui.postMessage({ type: 'generate-pptx', slides: slidesData });
+        const authorName = figma.currentUser ? figma.currentUser.name : 'Figma User';
+        figma.ui.postMessage({ type: 'generate-pptx', slides: slidesData, author: authorName });
     }
 };

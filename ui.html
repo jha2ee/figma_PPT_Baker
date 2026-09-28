@@ -276,6 +276,11 @@
 
     if (msg.type === 'generate-pptx') {
       let pptx = new PptxGenJS(); 
+
+      pptx.author = msg.author;
+      pptx.company = msg.author;
+      pptx.title = document.getElementById('opt-file-name').value || 'Figma Export';
+      
       const bufferToBase64 = (b) => new Promise(r => { const reader = new FileReader(); reader.onload = () => r(reader.result); reader.readAsDataURL(new Blob([b])); });
       
       const first = msg.slides[0]; 
