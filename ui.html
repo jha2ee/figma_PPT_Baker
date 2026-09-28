@@ -170,7 +170,7 @@
 <div class="layout-container">
   <div class="column-left">
     <div class="left-fill-panel">
-      <div class="panel-title">1. 선택된 화면 순서 (드래그로 정렬순서 변경)</div>
+      <div class="panel-title">1. 선택된 화면 순서 (드래그로 정렬)</div>
       <ul id="frame-list">
         <li style="padding: 10px; color: #999; text-align: center; margin-top: 250px;">프레임을 선택해주세요.</li>
       </ul>
@@ -193,16 +193,22 @@
       <input type="text" id="opt-image-keywords" value="numbering" placeholder="예: numbering, icon">
     </div>
 
+    <!-- [추가] 순정 표 변환 키워드 입력 패널 -->
     <div class="panel">
-      <div class="panel-title">5. 저장할 파일 이름</div>
+      <div class="panel-title">5. 순정 표(Table)로 묶어낼 레이어 이름</div>
+      <input type="text" id="opt-table-keywords" value="table_, grid" placeholder="예: table_">
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">6. 저장할 파일 이름</div>
       <input type="text" id="opt-file-name" placeholder="파일명 입력">
     </div>
 
     <div class="panel">
-      <div class="panel-title">6. 2번에서 입력한 항목 중첩 배경 처리 옵션</div>
+      <div class="panel-title">7. 중첩 배경(Container) 처리 옵션</div>
       <label style="font-size: 12px; display: flex; align-items: center; gap: 6px; cursor: pointer;">
         <input type="checkbox" id="opt-extract-nested" checked>
-        하위 레이어를 개별 이미지로 분리하기
+        하위 배경을 개별 투명 이미지로 분리하기
       </label>
       <div style="font-size: 10.5px; color: #777; margin-top: 4px; padding-left: 20px;">
         * 체크 해제 시: 내부의 모든 도형을 하나의 통이미지로 병합하여 굽습니다.
@@ -219,11 +225,8 @@
     <div class="info-box">
       <div class="info-box-title">💡 맞춤형 가이드 안내</div>
       <ul>
-        <li><b>키워드 매칭 규칙:</b> 지정한 단어와 완벽히 일치하지 않아도, 레이어 이름에 <strong>해당 키워드가 포함</strong>되어 있으면 전부 자동으로 찾아내어 적용합니다.
-          <br />(예: <code
-            style="background:#fff; padding:1px 4px; border-radius:3px; border:1px solid #BEE3FF;">panel</code> 입력 시
-          <code style="color:#007BE5;">panel_공통</code>, <code style="color:#007BE5;">main_panel</code> 모두 매칭)</li>
-        <li>상기 입력한 <strong>텍스트 지정 키워드</strong>와 <strong>이미지 지정 키워드</strong>는 레이어 깊이와 무관하게 최우선 적용됩니다.</li>
+        <li><b>키워드 매칭 규칙:</b> 레이어 이름에 <strong>해당 키워드가 포함</strong>되어 있으면 전부 자동으로 찾아내어 적용합니다.</li>
+        <li>텍스트, 이미지, 표 지정 키워드는 레이어 깊이와 무관하게 최우선 적용됩니다.</li>
         <li>레이어 이름은 쉼표로 구분하며, 대소문자를 구분하지 않습니다.</li>
         <li>아이콘 폰트는 깨짐 방지를 위해 자동으로 모두 <strong>이미지화</strong> 처리됩니다.</li>
       </ul>
@@ -233,71 +236,94 @@
 
 <script>
   let currentFrames = []; let dragStartIndex = -1; let customFileName = 'Figma_to_PPT';
+  
   function renderFrameList() {
     const listEl = document.getElementById('frame-list'); const btn = document.getElementById('exportBtn');
-    listEl.innerHTML = ''; if (currentFrames.length === 0) { listEl.innerHTML = '<li style="padding: 10px; color: #999; text-align: center; margin-top: 250px;">프레임을 선택해주세요.</li>'; btn.disabled = true; return; }
+    listEl.innerHTML = ''; 
+    if (currentFrames.length === 0) { 
+      listEl.innerHTML = '<li style="padding: 10px; color: #999; text-align: center; margin-top: 250px;">프레임을 선택해주세요.</li>'; 
+      btn.disabled = true; return; 
+    }
     btn.disabled = false;
     currentFrames.forEach((frame, index) => {
       const li = document.createElement('li'); li.className = 'frame-item'; li.draggable = true; li.innerHTML = `<span>≡ ${frame.name}</span>`;
       li.addEventListener('dragstart', () => { dragStartIndex = index; });
       li.addEventListener('dragover', (e) => e.preventDefault());
-      li.addEventListener('drop', () => { if (dragStartIndex !== index) { const item = currentFrames.splice(dragStartIndex, 1)[0]; currentFrames.splice(index, 0, item); renderFrameList(); } });
+      li.addEventListener('drop', () => { 
+        if (dragStartIndex !== index) { 
+          const item = currentFrames.splice(dragStartIndex, 1)[0]; 
+          currentFrames.splice(index, 0, item); 
+          renderFrameList(); 
+        } 
+      });
       listEl.appendChild(li);
     });
   }
 
   window.onmessage = async (event) => {
     const msg = event.data.pluginMessage;
-    if (msg.type === 'selection-changed') { currentFrames = msg.frames; renderFrameList(); if (currentFrames.length > 0) document.getElementById('opt-file-name').value = currentFrames[0].name; }
-    if (msg.type === 'update-progress') { document.getElementById('progress-container').style.display = 'block'; document.getElementById('progress-bar').style.width = (msg.current / msg.total * 100) + '%'; document.getElementById('status').innerText = msg.frameName + ' 분석 중...'; }
+    
+    if (msg.type === 'selection-changed') { 
+      currentFrames = msg.frames; renderFrameList(); 
+      if (currentFrames.length > 0) document.getElementById('opt-file-name').value = currentFrames[0].name; 
+    }
+    
+    if (msg.type === 'update-progress') { 
+      document.getElementById('progress-container').style.display = 'block'; 
+      document.getElementById('progress-bar').style.width = (msg.current / msg.total * 100) + '%'; 
+      document.getElementById('status').innerText = msg.frameName + ' 분석 중...'; 
+    }
 
     if (msg.type === 'generate-pptx') {
-      let pptx = new PptxGenJS(); const bufferToBase64 = (b) => new Promise(r => { const reader = new FileReader(); reader.onload = () => r(reader.result); reader.readAsDataURL(new Blob([b])); });
-      const first = msg.slides[0]; pptx.defineLayout({ name: 'F', width: first.width / 96, height: first.height / 96 }); pptx.layout = 'F';
+      let pptx = new PptxGenJS(); 
+      const bufferToBase64 = (b) => new Promise(r => { const reader = new FileReader(); reader.onload = () => r(reader.result); reader.readAsDataURL(new Blob([b])); });
+      
+      const first = msg.slides[0]; 
+      pptx.defineLayout({ name: 'F', width: first.width / 96, height: first.height / 96 }); 
+      pptx.layout = 'F';
 
       for (let i = 0; i < msg.slides.length; i++) {
-        const sData = msg.slides[i]; pptx.defineLayout({ name: 'L' + i, width: sData.width / 96, height: sData.height / 96 });
-        let slide = pptx.addSlide({ layout: 'L' + i });
-        if (sData.backgroundColor) {
-          slide.background = { fill: sData.backgroundColor };
-        }
+        const sData = msg.slides[i]; 
+        pptx.defineLayout({ name: 'L' + i, width: sData.width / 96, height: sData.height / 96 });
+        
+        // [완벽 패치] 프레임의 바탕색을 슬라이드 배경색으로 적용합니다. (없으면 기본 흰색)
+        let slide = pptx.addSlide({ layout: 'L' + i, bkgd: sData.backgroundColor || 'FFFFFF' });
+
         for (const el of sData.elements) {
           if (el.type === 'image') {
             slide.addImage({ data: await bufferToBase64(el.bytes), x: el.x + '%', y: el.y + '%', w: el.w + '%', h: el.h + '%' });
-          } else {
-            let finalX = el.x; let finalW = el.w;
-            if (!el.autoWrap) {
-              const widthBuffer = 2.5;
-              finalW = el.w + widthBuffer;
-
-              if (el.align === 'center') {
-                finalX = el.x - (widthBuffer / 2);
-              } else if (el.align === 'right') {
-                finalX = el.x - widthBuffer;
-              }
-            }
-
-            // [마스터 패치] 글자별 스타일 정보가 담긴 el.textChunks 배열 데이터를 직접 바인딩하여 
-            // PPT 상자 하나 안에 부분 색상과 부분 굵기가 완벽하게 조화되도록 렌더링을 위임합니다.
+          } 
+          // [추가] 표(Table) 렌더링 분기
+          else if (el.type === 'table') {
+            slide.addTable(el.rows, { 
+              x: el.x + '%', y: el.y + '%', w: el.w + '%', h: el.h + '%' 
+            });
+          } 
+          else if (el.type === 'text') {
+            // [완벽 패치] 폭을 임의로 늘리던 widthBuffer 꼼수 전면 삭제. 피그마의 좌표와 너비를 100% 신뢰합니다.
             slide.addText(el.textChunks, {
-              x: finalX + '%',
+              x: el.x + '%',
               y: el.y + '%',
-              w: finalW + '%',
+              w: el.w + '%',
               h: el.h + '%',
               align: el.align,
               valign: el.valign,
               wrap: el.autoWrap,
+              fit: 'shrink', //줄바꿈 여부와 상관없이 무조건 상자 밖으로 넘치면 축소
               margin: [0, 0, 0, 0],
               paraSpaceBefore: 0,
               paraSpaceAfter: 0,
-              //lineSpacingMultiple: el.lhMultiple,
+              lineSpacingMultiple: el.lhMultiple // [완벽 패치] 추출해 온 줄 간격 비율 적용
             });
           }
         }
       }
+      
       const name = document.getElementById('opt-file-name').value || 'Export';
       await pptx.writeFile({ fileName: name.endsWith('.pptx') ? name : name + '.pptx' });
-      document.getElementById('status').innerText = '변환 완료! 🎉'; document.getElementById('progress-container').style.display = 'none'; document.getElementById('exportBtn').disabled = false;
+      document.getElementById('status').innerText = '변환 완료! 🎉'; 
+      document.getElementById('progress-container').style.display = 'none'; 
+      document.getElementById('exportBtn').disabled = false;
     }
   };
 
@@ -310,6 +336,7 @@
     const boundaryNames = document.getElementById('opt-boundary-names').value.split(',');
     const textKeywords = document.getElementById('opt-text-keywords').value.split(',');
     const imageKeywords = document.getElementById('opt-image-keywords').value.split(',');
+    const tableKeywords = document.getElementById('opt-table-keywords').value.split(','); // [추가] 테이블 키워드
     const extractNested = document.getElementById('opt-extract-nested').checked;
 
     parent.postMessage({
@@ -319,6 +346,7 @@
         boundaryNames: boundaryNames,
         textKeywords: textKeywords,
         imageKeywords: imageKeywords,
+        tableKeywords: tableKeywords, // [추가] code.ts로 전송
         extractNested: extractNested
       }
     }, '*');

@@ -1,5 +1,5 @@
 "use strict";
-figma.showUI(__html__, { width: 720, height: 650 }); // 기획자님의 720x620 마스터 규격 고정
+figma.showUI(__html__, { width: 720, height: 650 });
 function sendSelectionToUI() {
     const selectedNodes = figma.currentPage.selection;
     let frames = selectedNodes.filter(node => node.type === 'FRAME');
@@ -40,12 +40,39 @@ function checkIsBakedBoundary(node, boundaries) {
     const name = node.name.toLowerCase().trim();
     return boundaries.some((b) => name.includes(b));
 }
+function isIconFontTextNode(node) {
+    try {
+        const iconKeywords = ['fontawesome', 'material', 'icon', 'symbol', 'remix', 'phosphor'];
+        if (node.fontName === figma.mixed) {
+            for (let i = 0; i < node.characters.length; i++) {
+                const font = node.getRangeFontName(i, i + 1);
+                if (font !== figma.mixed) {
+                    const family = font.family.toLowerCase().replace(/\s/g, '');
+                    if (iconKeywords.some(keyword => family.includes(keyword)))
+                        return true;
+                }
+            }
+            return false;
+        }
+        else {
+            const fontName = node.fontName;
+            if (!fontName || !fontName.family)
+                return false;
+            const family = fontName.family.toLowerCase().replace(/\s/g, '');
+            return iconKeywords.some(keyword => family.includes(keyword));
+        }
+    }
+    catch (e) {
+        return false;
+    }
+}
 figma.ui.onmessage = async (msg) => {
     if (msg.type === 'export-ppt') {
-        const { orderedIds, boundaryNames, textKeywords, imageKeywords, extractNested } = msg;
+        const { orderedIds, boundaryNames, textKeywords, imageKeywords, tableKeywords, extractNested } = msg;
         const boundaries = boundaryNames.map((b) => b.trim().toLowerCase()).filter(Boolean);
         const textKeys = textKeywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
         const imageKeys = imageKeywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
+        const tableKeys = tableKeywords ? tableKeywords.map((k) => k.trim().toLowerCase()).filter(Boolean) : [];
         const allSelectedFrames = figma.currentPage.selection.filter(node => node.type === 'FRAME');
         let initialFrames = orderedIds.map((id) => allSelectedFrames.find(f => f.id === id)).filter(Boolean);
         const frames = initialFrames.filter(frame => {
@@ -84,15 +111,21 @@ figma.ui.onmessage = async (msg) => {
                 }
             }
             assignZIndex(frame);
+            const targetTableNodes = frame.findAll(node => {
+                if (!isNodeVisible(node, frame))
+                    return false;
+                const name = node.name.toLowerCase().trim();
+                return tableKeys.some((k) => name.includes(k));
+            });
             const targetTextNodes = frame.findAll(node => {
                 if (node.type !== 'TEXT')
                     return false;
                 if (!isNodeVisible(node, frame))
                     return false;
                 const tNode = node;
-                if (tNode.fontName !== figma.mixed && tNode.fontName.family.includes('Font Awesome'))
-                    return false;
-                let isDesc = false, inNumbering = false, inBakedBoundary = false;
+                if (isIconFontTextNode(tNode))
+                    return false; // 아이콘 폰트는 텍스트 추출에서 강제 제외
+                let isDesc = false, inNumbering = false, inBakedBoundary = false, inTable = false;
                 let currNode = node;
                 while (currNode && currNode !== frame) {
                     const pName = currNode.name.toLowerCase().trim();
@@ -100,10 +133,14 @@ figma.ui.onmessage = async (msg) => {
                         isDesc = true;
                     if (imageKeys.some((k) => pName.includes(k)))
                         inNumbering = true;
+                    if (tableKeys.some((k) => pName.includes(k)))
+                        inTable = true;
                     if (checkIsBakedBoundary(currNode, boundaries))
                         inBakedBoundary = true;
                     currNode = currNode.parent;
                 }
+                if (inTable)
+                    return false;
                 if (inNumbering)
                     return false;
                 if (isDesc)
@@ -114,22 +151,21 @@ figma.ui.onmessage = async (msg) => {
             function collectImages(node, hasCapturedParent) {
                 if (!isNodeVisible(node, frame))
                     return;
-                const isFontAwesomeText = node.type === 'TEXT' &&
-                    node.fontName !== figma.mixed &&
-                    node.fontName.family.includes('Font Awesome');
+                const name = node.name.toLowerCase().trim();
+                const isTable = tableKeys.some((k) => name.includes(k));
+                if (isTable)
+                    return;
+                const isIconFontText = node.type === 'TEXT' && isIconFontTextNode(node);
                 if (node.type === 'TEXT' && targetTextNodes.includes(node))
                     return;
-                const name = node.name.toLowerCase().trim();
                 const isCustomImageKey = imageKeys.some((k) => name.includes(k));
                 const isBakedBoundary = checkIsBakedBoundary(node, boundaries);
                 let isCapturedHere = false;
-                // 1. 단독 이미지 키워드 (numbering 등) 
-                if (isCustomImageKey || isFontAwesomeText) {
+                if (isCustomImageKey || isIconFontText) {
                     if (!targetImageNodes.includes(node))
                         targetImageNodes.push(node);
                     isCapturedHere = true;
                 }
-                // 2. 통이미지 컨테이너 키워드 (panel, container 등)
                 else if (isBakedBoundary) {
                     if (!targetImageNodes.includes(node))
                         targetImageNodes.push(node);
@@ -137,7 +173,6 @@ figma.ui.onmessage = async (msg) => {
                     if (!extractNested)
                         return;
                 }
-                // 3. 자식 레이어들 재귀 탐색
                 if ('children' in node && node.type !== 'BOOLEAN_OPERATION') {
                     if (!isCapturedHere && !hasCapturedParent) {
                         if (hasVisibleGraphic(node) || node.type === 'INSTANCE' || node.type === 'COMPONENT') {
@@ -175,6 +210,66 @@ figma.ui.onmessage = async (msg) => {
                     targetImageNodes.push(node);
             }
             const elementsData = [];
+            for (const tableNode of targetTableNodes) {
+                const tBox = tableNode.absoluteBoundingBox ?? { x: tableNode.x, y: tableNode.y, width: tableNode.width, height: tableNode.height };
+                const tableRowsData = [];
+                const rows = tableNode.children.filter(n => n.type === 'FRAME' || n.type === 'GROUP');
+                for (const row of rows) {
+                    const rowCellsData = [];
+                    const cells = ('children' in row) ? row.children : [];
+                    for (const cell of cells) {
+                        let cellText = '';
+                        let fillColor = undefined;
+                        let borders = [{ pt: 1, color: 'CCCCCC' }, { pt: 1, color: 'CCCCCC' }, { pt: 1, color: 'CCCCCC' }, { pt: 1, color: 'CCCCCC' }];
+                        if ('fills' in cell && Array.isArray(cell.fills) && cell.fills.length > 0) {
+                            const fill = cell.fills.find(f => f.type === 'SOLID' && f.visible !== false);
+                            if (fill) {
+                                const toHex = (c) => { const hex = Math.round(c * 255).toString(16); return hex.length === 1 ? '0' + hex : hex; };
+                                fillColor = (toHex(fill.color.r) + toHex(fill.color.g) + toHex(fill.color.b)).toUpperCase();
+                            }
+                        }
+                        if ('strokeWeight' in cell) {
+                            const anyCell = cell;
+                            const hasStrokes = Array.isArray(anyCell.strokes) && anyCell.strokes.length > 0 && anyCell.strokes[0].visible !== false;
+                            if (hasStrokes) {
+                                let strokeColor = '000000';
+                                const sPaint = anyCell.strokes[0];
+                                if (sPaint.type === 'SOLID') {
+                                    const toHex = (c) => { const hex = Math.round(c * 255).toString(16); return hex.length === 1 ? '0' + hex : hex; };
+                                    strokeColor = (toHex(sPaint.color.r) + toHex(sPaint.color.g) + toHex(sPaint.color.b)).toUpperCase();
+                                }
+                                borders = [
+                                    { pt: anyCell.strokeTopWeight > 0 ? anyCell.strokeTopWeight : 0, color: strokeColor },
+                                    { pt: anyCell.strokeRightWeight > 0 ? anyCell.strokeRightWeight : 0, color: strokeColor },
+                                    { pt: anyCell.strokeBottomWeight > 0 ? anyCell.strokeBottomWeight : 0, color: strokeColor },
+                                    { pt: anyCell.strokeLeftWeight > 0 ? anyCell.strokeLeftWeight : 0, color: strokeColor }
+                                ];
+                            }
+                            else {
+                                borders = [{ pt: 0 }, { pt: 0 }, { pt: 0 }, { pt: 0 }];
+                            }
+                        }
+                        const textNode = ('findAll' in cell) ? cell.findAll((n) => n.type === 'TEXT')[0] : null;
+                        if (textNode)
+                            cellText = textNode.characters;
+                        rowCellsData.push({
+                            text: cellText,
+                            options: { fill: fillColor, border: borders, margin: 0, valign: 'middle' }
+                        });
+                    }
+                    if (rowCellsData.length > 0)
+                        tableRowsData.push(rowCellsData);
+                }
+                elementsData.push({
+                    type: 'table',
+                    zIndex: zIndexMap.get(tableNode.id) || 0,
+                    rows: tableRowsData,
+                    x: ((tBox.x - frameBox.x) / frame.width) * 100,
+                    y: ((tBox.y - frameBox.y) / frame.height) * 100,
+                    w: (tBox.width / frame.width) * 100,
+                    h: (tBox.height / frame.height) * 100
+                });
+            }
             for (const node of targetImageNodes) {
                 const nodeBox = node.absoluteBoundingBox ?? { x: node.x, y: node.y, width: node.width, height: node.height };
                 const renderBounds = node.absoluteRenderBounds ?? nodeBox;
@@ -228,7 +323,6 @@ figma.ui.onmessage = async (msg) => {
                         isDesc = true;
                     currNode = currNode.parent;
                 }
-                const hasNewLine = node.characters.includes('\n');
                 let autoWrap = node.textAutoResize !== 'WIDTH_AND_HEIGHT';
                 let align = 'left';
                 if (node.textAlignHorizontal === 'CENTER')
@@ -240,30 +334,31 @@ figma.ui.onmessage = async (msg) => {
                     valign = 'middle';
                 else if (node.textAlignVertical === 'BOTTOM')
                     valign = 'bottom';
-                // [최종 패치 1] 피그마의 줄 간격을 파워포인트와 완벽 호환되는 '상대 배율(Multiple)'로 추출합니다.
-                let lhMultiple = 1.2;
+                let figmaLh = 1.2;
                 if (node.lineHeight !== figma.mixed) {
                     if (node.lineHeight.unit === 'PERCENT') {
-                        lhMultiple = node.lineHeight.value / 100;
+                        figmaLh = node.lineHeight.value / 100;
                     }
                     else if (node.lineHeight.unit === 'PIXELS') {
                         const fSize = typeof node.fontSize === 'number' ? node.fontSize : 14;
-                        lhMultiple = node.lineHeight.value / fSize;
+                        figmaLh = node.lineHeight.value / fSize;
                     }
                     else if (node.lineHeight.unit === 'AUTO') {
-                        lhMultiple = 1.2;
+                        figmaLh = 1.2;
                     }
                 }
+                let lhMultiple = figmaLh / 1.2;
                 const textChunks = [];
                 const chars = node.characters;
                 for (let idx = 0; idx < chars.length; idx++) {
                     let charColor = '000000';
                     let charBold = false;
                     let charItalic = false;
+                    let charStrike = false;
+                    let charUnderline = false;
                     let charFontFamily = 'Arial';
                     let charFontSize = node.fontSize !== figma.mixed ? node.fontSize : 14;
                     try {
-                        // ... (기존 개별 글자 스타일 추적 try-catch문 그대로 유지) ...
                         const charFill = node.getRangeFills(idx, idx + 1);
                         if (charFill !== figma.mixed && Array.isArray(charFill) && charFill.length > 0) {
                             const fill = charFill.find((f) => f.type === 'SOLID' && f.visible !== false);
@@ -285,6 +380,13 @@ figma.ui.onmessage = async (msg) => {
                         if (charSize !== figma.mixed && typeof charSize === 'number') {
                             charFontSize = charSize;
                         }
+                        const charDeco = node.getRangeTextDecoration(idx, idx + 1);
+                        if (charDeco !== figma.mixed) {
+                            if (charDeco === 'STRIKETHROUGH')
+                                charStrike = true;
+                            if (charDeco === 'UNDERLINE')
+                                charUnderline = true;
+                        }
                     }
                     catch (e) { }
                     let finalFontSize = charFontSize * 0.75;
@@ -296,7 +398,9 @@ figma.ui.onmessage = async (msg) => {
                             bold: charBold,
                             italic: charItalic,
                             fontFace: finalFontFamily,
-                            fontSize: finalFontSize
+                            fontSize: finalFontSize,
+                            strike: charStrike,
+                            underline: charUnderline ? { style: 'single' } : false
                         }
                     });
                 }
@@ -314,7 +418,7 @@ figma.ui.onmessage = async (msg) => {
                     valign: valign,
                     isDesc: isDesc,
                     autoWrap: autoWrap,
-                    lhMultiple: lhMultiple // [추가] 추출한 줄 간격 배율을 넘겨줍니다.
+                    lhMultiple: lhMultiple
                 });
             }
             elementsData.sort((a, b) => a.zIndex - b.zIndex);
