@@ -39,10 +39,6 @@
     margin-bottom: 12px;
   }
 
-  .panel:last-child {
-    margin-bottom: 0;
-  }
-
   .panel-title {
     font-size: 11px;
     font-weight: bold;
@@ -83,10 +79,6 @@
     cursor: grab;
   }
 
-  .frame-item:last-child {
-    border-bottom: none;
-  }
-
   input[type="text"] {
     width: 100%;
     box-sizing: border-box;
@@ -109,10 +101,6 @@
     margin-top: 4px;
   }
 
-  #exportBtn:hover {
-    background: #007BE5;
-  }
-
   #exportBtn:disabled {
     background: #ccc;
     cursor: not-allowed;
@@ -124,6 +112,16 @@
     color: #666;
     text-align: center;
     font-weight: bold;
+    word-break: break-all;
+  }
+
+  /* 에러 발생 시 적용되는 스타일 */
+  #status.error {
+    color: #E53935;
+    background: #FFEBEE;
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #FFCDD2;
   }
 
   #progress-container {
@@ -141,29 +139,6 @@
     height: 100%;
     background: #0D99FF;
     transition: width 0.3s ease-out;
-  }
-
-  .info-box {
-    margin-top: 12px;
-    padding: 12px;
-    background: #E5F4FF;
-    border-radius: 6px;
-    border: 1px solid #BEE3FF;
-  }
-
-  .info-box-title {
-    font-size: 11px;
-    font-weight: bold;
-    color: #007BE5;
-    margin-bottom: 6px;
-  }
-
-  .info-box ul {
-    font-size: 10.5px;
-    color: #444;
-    margin: 0;
-    padding-left: 16px;
-    line-height: 1.55;
   }
 </style>
 
@@ -193,7 +168,6 @@
       <input type="text" id="opt-image-keywords" value="numbering" placeholder="예: numbering, icon">
     </div>
 
-    <!-- [추가] 순정 표 변환 키워드 입력 패널 -->
     <div class="panel">
       <div class="panel-title">5. 순정 표(Table)로 묶어낼 레이어 이름</div>
       <input type="text" id="opt-table-keywords" value="table_, grid" placeholder="예: table_">
@@ -210,9 +184,6 @@
         <input type="checkbox" id="opt-extract-nested" checked>
         하위 배경을 개별 투명 이미지로 분리하기
       </label>
-      <div style="font-size: 10.5px; color: #777; margin-top: 4px; padding-left: 20px;">
-        * 체크 해제 시: 내부의 모든 도형을 하나의 통이미지로 병합하여 굽습니다.
-      </div>
     </div>
 
     <button id="exportBtn" disabled>PPTX 변환 시작</button>
@@ -221,114 +192,201 @@
     <div id="progress-container">
       <div id="progress-bar"></div>
     </div>
-
-    <div class="info-box">
-      <div class="info-box-title">💡 맞춤형 가이드 안내</div>
-      <ul>
-        <li><b>키워드 매칭 규칙:</b> 레이어 이름에 <strong>해당 키워드가 포함</strong>되어 있으면 전부 자동으로 찾아내어 적용합니다.</li>
-        <li>텍스트, 이미지, 표 지정 키워드는 레이어 깊이와 무관하게 최우선 적용됩니다.</li>
-        <li>레이어 이름은 쉼표로 구분하며, 대소문자를 구분하지 않습니다.</li>
-        <li>아이콘 폰트는 깨짐 방지를 위해 자동으로 모두 <strong>이미지화</strong> 처리됩니다.</li>
-      </ul>
-    </div>
   </div>
 </div>
 
 <script>
-  let currentFrames = []; let dragStartIndex = -1; let customFileName = 'Figma_to_PPT';
-  
+  let currentFrames = []; let dragStartIndex = -1;
+
   function renderFrameList() {
     const listEl = document.getElementById('frame-list'); const btn = document.getElementById('exportBtn');
-    listEl.innerHTML = ''; 
-    if (currentFrames.length === 0) { 
-      listEl.innerHTML = '<li style="padding: 10px; color: #999; text-align: center; margin-top: 250px;">프레임을 선택해주세요.</li>'; 
-      btn.disabled = true; return; 
+    listEl.innerHTML = '';
+    if (currentFrames.length === 0) {
+      listEl.innerHTML = '<li style="padding: 10px; color: #999; text-align: center; margin-top: 250px;">프레임을 선택해주세요.</li>';
+      btn.disabled = true; return;
     }
     btn.disabled = false;
     currentFrames.forEach((frame, index) => {
       const li = document.createElement('li'); li.className = 'frame-item'; li.draggable = true; li.innerHTML = `<span>≡ ${frame.name}</span>`;
       li.addEventListener('dragstart', () => { dragStartIndex = index; });
       li.addEventListener('dragover', (e) => e.preventDefault());
-      li.addEventListener('drop', () => { 
-        if (dragStartIndex !== index) { 
-          const item = currentFrames.splice(dragStartIndex, 1)[0]; 
-          currentFrames.splice(index, 0, item); 
-          renderFrameList(); 
-        } 
+      li.addEventListener('drop', () => {
+        if (dragStartIndex !== index) {
+          const item = currentFrames.splice(dragStartIndex, 1)[0];
+          currentFrames.splice(index, 0, item);
+          renderFrameList();
+        }
       });
       listEl.appendChild(li);
     });
   }
 
+  // 사용자 에러 피드백 표시 함수
+  function showErrorFeedback(errorMessage) {
+    const statusEl = document.getElementById('status');
+    const btn = document.getElementById('exportBtn');
+    const progressContainer = document.getElementById('progress-container');
+
+    statusEl.className = 'error';
+    statusEl.innerText = '❌ 오류 발생: ' + errorMessage;
+    progressContainer.style.display = 'none';
+    btn.disabled = false;
+
+    // 알림 팝업 전송
+    alert('PPT 변환 중 오류가 발생했습니다.\n\n' + errorMessage);
+  }
+
+  function resetStatus() {
+    const statusEl = document.getElementById('status');
+    statusEl.className = '';
+    statusEl.innerText = '대기 중...';
+    document.getElementById('progress-container').style.display = 'none';
+    document.getElementById('exportBtn').disabled = false;
+  }
+
   window.onmessage = async (event) => {
     const msg = event.data.pluginMessage;
-    
-    if (msg.type === 'selection-changed') { 
-      currentFrames = msg.frames; renderFrameList(); 
-      if (currentFrames.length > 0) document.getElementById('opt-file-name').value = currentFrames[0].name; 
+
+    if (msg.type === 'selection-changed') {
+      currentFrames = msg.frames; renderFrameList();
+      if (currentFrames.length > 0) document.getElementById('opt-file-name').value = currentFrames[0].name;
     }
-    
-    if (msg.type === 'update-progress') { 
-      document.getElementById('progress-container').style.display = 'block'; 
-      document.getElementById('progress-bar').style.width = (msg.current / msg.total * 100) + '%'; 
-      document.getElementById('status').innerText = msg.frameName + ' 분석 중...'; 
+
+    if (msg.type === 'update-progress') {
+      const statusEl = document.getElementById('status');
+      statusEl.className = '';
+      document.getElementById('progress-container').style.display = 'block';
+      document.getElementById('progress-bar').style.width = (msg.current / msg.total * 100) + '%';
+      statusEl.innerText = `[${msg.current}/${msg.total}] ${msg.frameName} 분석 중...`;
+    }
+
+    if (msg.type === 'reset-status') {
+      resetStatus();
+    }
+
+    if (msg.type === 'error-occurred') {
+      showErrorFeedback(msg.message);
     }
 
     if (msg.type === 'generate-pptx') {
-      let pptx = new PptxGenJS(); 
+      try {
+        const statusEl = document.getElementById('status');
+        statusEl.className = '';
+        statusEl.innerText = 'PPTX 파일 생성 및 압축 중... 잠시만 기다려주세요.';
 
-      pptx.author = msg.author;
-      pptx.company = msg.author;
-      pptx.title = document.getElementById('opt-file-name').value || 'Figma Export';
-      
-      const bufferToBase64 = (b) => new Promise(r => { const reader = new FileReader(); reader.onload = () => r(reader.result); reader.readAsDataURL(new Blob([b])); });
-      
-      const first = msg.slides[0]; 
-      pptx.defineLayout({ name: 'F', width: first.width / 96, height: first.height / 96 }); 
-      pptx.layout = 'F';
+        let pptx = new PptxGenJS();
 
-      for (let i = 0; i < msg.slides.length; i++) {
-        const sData = msg.slides[i]; 
-        pptx.defineLayout({ name: 'L' + i, width: sData.width / 96, height: sData.height / 96 });
-        
-        // [완벽 패치] 프레임의 바탕색을 슬라이드 배경색으로 적용합니다. (없으면 기본 흰색)
-        let slide = pptx.addSlide({ layout: 'L' + i, bkgd: sData.backgroundColor || 'FFFFFF' });
+        const sanitizeXmlText = (str) => {
+          if (!str) return '';
+          return String(str).replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F]/g, '').trim();
+        };
 
-        for (const el of sData.elements) {
-          if (el.type === 'image') {
-            slide.addImage({ data: await bufferToBase64(el.bytes), x: el.x + '%', y: el.y + '%', w: el.w + '%', h: el.h + '%' });
-          } 
-          // [추가] 표(Table) 렌더링 분기
-          else if (el.type === 'table') {
-            slide.addTable(el.rows, { 
-              x: el.x + '%', y: el.y + '%', w: el.w + '%', h: el.h + '%' 
-            });
-          } 
-          else if (el.type === 'text') {
-            // [완벽 패치] 폭을 임의로 늘리던 widthBuffer 꼼수 전면 삭제. 피그마의 좌표와 너비를 100% 신뢰합니다.
-            slide.addText(el.textChunks, {
-              x: el.x + '%',
-              y: el.y + '%',
-              w: el.w + '%',
-              h: el.h + '%',
-              align: el.align,
-              valign: el.valign,
-              wrap: el.autoWrap,
-              fit: 'shrink', //줄바꿈 여부와 상관없이 무조건 상자 밖으로 넘치면 축소
-              margin: [0, 0, 0, 0],
-              paraSpaceBefore: 0,
-              paraSpaceAfter: 0,
-              lineSpacingMultiple: el.lhMultiple // [완벽 패치] 추출해 온 줄 간격 비율 적용
-            });
+        pptx.author = sanitizeXmlText(msg.author) || 'Author';
+        pptx.company = sanitizeXmlText(msg.author) || 'Company';
+        pptx.title = sanitizeXmlText(document.getElementById('opt-file-name').value) || 'Export';
+
+        const bufferToBase64 = (b) => new Promise((resolve, reject) => {
+          try {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = (e) => reject(e);
+            reader.readAsDataURL(new Blob([b]));
+          } catch (err) {
+            reject(err);
+          }
+        });
+
+        const first = msg.slides[0];
+        const defaultW = (first && first.width > 0) ? first.width / 96 : 10;
+        const defaultH = (first && first.height > 0) ? first.height / 96 : 5.625;
+        pptx.defineLayout({ name: 'DEFAULT_LAYOUT', width: defaultW, height: defaultH });
+        pptx.layout = 'DEFAULT_LAYOUT';
+
+        for (let i = 0; i < msg.slides.length; i++) {
+          const sData = msg.slides[i];
+          const slideW = (sData.width > 0) ? sData.width / 96 : defaultW;
+          const slideH = (sData.height > 0) ? sData.height / 96 : defaultH;
+
+          pptx.defineLayout({ name: 'L' + i, width: slideW, height: slideH });
+          let slide = pptx.addSlide({ layout: 'L' + i });
+
+          const validColor = (sData.backgroundColor && /^[0-9A-FA-F]{6}$/.test(sData.backgroundColor))
+            ? sData.backgroundColor
+            : 'FFFFFF';
+          slide.background = { color: validColor };
+          slide.bkgd = validColor;
+
+          for (const el of sData.elements) {
+            try {
+              if (el.type === 'image' && el.bytes) {
+                const base64Data = await bufferToBase64(el.bytes);
+                slide.addImage({ data: base64Data, x: el.x + '%', y: el.y + '%', w: el.w + '%', h: el.h + '%' });
+              }
+              else if (el.type === 'table' && Array.isArray(el.rows) && el.rows.length > 0) {
+                const sanitizedRows = el.rows.map(row => {
+                  if (!Array.isArray(row)) return [];
+                  return row.map(cell => {
+                    const cellObj = cell || {};
+                    const opts = cellObj.options || {};
+                    return {
+                      text: cellObj.text || '',
+                      options: {
+                        fill: opts.fill || 'FFFFFF',
+                        valign: opts.valign || 'middle',
+                        margin: typeof opts.margin === 'number' ? opts.margin : 2,
+                        border: Array.isArray(opts.border) ? opts.border : [
+                          { pt: 0, color: 'FFFFFF' },
+                          { pt: 0, color: 'FFFFFF' },
+                          { pt: 0, color: 'FFFFFF' },
+                          { pt: 0, color: 'FFFFFF' }
+                        ]
+                      }
+                    };
+                  });
+                });
+
+                slide.addTable(sanitizedRows, { x: el.x + '%', y: el.y + '%', w: el.w + '%', h: el.h + '%' });
+              }
+              else if (el.type === 'text' && Array.isArray(el.textChunks) && el.textChunks.length > 0) {
+                const textOptions = {
+                  x: el.x + '%',
+                  y: el.y + '%',
+                  w: el.w + '%',
+                  h: el.h + '%',
+                  align: el.align || 'left',
+                  valign: el.valign || 'top',
+                  wrap: el.autoWrap !== false,
+                  fit: 'shrink',
+                  margin: [0, 0, 0, 0],
+                  paraSpaceBefore: 0,
+                  paraSpaceAfter: 0
+                };
+                if (typeof el.lhMultiple === 'number' && !isNaN(el.lhMultiple) && el.lhMultiple > 0) {
+                  textOptions.lineSpacingMultiple = el.lhMultiple;
+                }
+
+                slide.addText(el.textChunks, textOptions);
+              }
+            } catch (elemErr) {
+              console.warn("Element render skipped:", el.type, elemErr);
+            }
           }
         }
+
+        const rawName = document.getElementById('opt-file-name').value || 'Export';
+        const cleanFileName = rawName.replace(/[/\\?%*:|"<>]/g, '_');
+
+        // 파일 쓰기 수행
+        await pptx.writeFile({ fileName: cleanFileName.endsWith('.pptx') ? cleanFileName : cleanFileName + '.pptx' });
+
+        statusEl.innerText = '변환 완료! 🎉';
+        document.getElementById('progress-container').style.display = 'none';
+        document.getElementById('exportBtn').disabled = false;
+
+      } catch (err) {
+        console.error("PPTX Generation Error:", err);
+        showErrorFeedback(err.message || 'PPT 생성 중 알 수 없는 오류가 발생했습니다.');
       }
-      
-      const name = document.getElementById('opt-file-name').value || 'Export';
-      await pptx.writeFile({ fileName: name.endsWith('.pptx') ? name : name + '.pptx' });
-      document.getElementById('status').innerText = '변환 완료! 🎉'; 
-      document.getElementById('progress-container').style.display = 'none'; 
-      document.getElementById('exportBtn').disabled = false;
     }
   };
 
@@ -336,12 +394,15 @@
     document.getElementById('exportBtn').disabled = true;
     document.getElementById('progress-container').style.display = 'block';
     document.getElementById('progress-bar').style.width = '5%';
-    document.getElementById('status').innerText = '디자인을 분석할 준비를 하고 있습니다...';
+
+    const statusEl = document.getElementById('status');
+    statusEl.className = '';
+    statusEl.innerText = '디자인을 분석할 준비를 하고 있습니다...';
 
     const boundaryNames = document.getElementById('opt-boundary-names').value.split(',');
     const textKeywords = document.getElementById('opt-text-keywords').value.split(',');
     const imageKeywords = document.getElementById('opt-image-keywords').value.split(',');
-    const tableKeywords = document.getElementById('opt-table-keywords').value.split(','); // [추가] 테이블 키워드
+    const tableKeywords = document.getElementById('opt-table-keywords').value.split(',');
     const extractNested = document.getElementById('opt-extract-nested').checked;
 
     parent.postMessage({
@@ -351,7 +412,7 @@
         boundaryNames: boundaryNames,
         textKeywords: textKeywords,
         imageKeywords: imageKeywords,
-        tableKeywords: tableKeywords, // [추가] code.ts로 전송
+        tableKeywords: tableKeywords,
         extractNested: extractNested
       }
     }, '*');
