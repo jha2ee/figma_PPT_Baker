@@ -86,28 +86,14 @@ function isClippedByAncestor(node: SceneNode, rootFrame: FrameNode): boolean {
           const overlapW = x2 - x1;
           const overlapH = y2 - y1;
 
-          if (overlapW <= 1 || overlapH <= 1) {
+          // 교차 영역이 없거나 0.5px 이하이면 완전히 벗어난 것으로 판정
+          if (overlapW <= 0.5 || overlapH <= 0.5) {
             return true;
           }
 
-          // 3) 중심점(Center) 검사 (중심이 클리핑 상자 밖이면 넘친 콘텐츠로 처리)
-          const centerX = nodeBox.x + nodeBox.width / 2;
-          const centerY = nodeBox.y + nodeBox.height / 2;
-          if (
-            centerX < clipBox.x ||
-            centerX > clipRight ||
-            centerY < clipBox.y ||
-            centerY > clipBottom
-          ) {
-            return true;
-          }
-
-          // 4) 교차 면적 비율 검사 (노드 면적의 50% 이상이 잘려나간 경우)
-          const nodeArea = nodeBox.width * nodeBox.height;
-          const overlapArea = overlapW * overlapH;
-          if (nodeArea > 0 && overlapArea / nodeArea < 0.5) {
-            return true;
-          }
+          // [안전 가드] 슬라이드/컨테이너 경계선에 걸쳐 있는 긴 아코디언, 카드,
+          // '다음 슬라이드에서 계속' 영역 등이 과도하게 삭제되지 않도록
+          // 중심점 검사 및 50% 교차면적 강제 삭제 로직은 제외함 (화면에 걸쳐 있는 부분은 유지)
         }
       }
 
@@ -338,7 +324,15 @@ figma.ui.onmessage = async (msg) => {
         const targetImageNodes: SceneNode[] = [];
 
         function collectImages(node: SceneNode, hasCapturedParent: boolean) {
-          if (!isNodeVisible(node, frame)) return;
+          // 레이어의 visible 속성이 꺼져 있는 경우는 자식도 포함하여 완전히 제외
+          let cur: BaseNode | null = node;
+          while (cur) {
+            if ('visible' in cur && cur.visible === false) return;
+            if (cur === frame) break;
+            cur = cur.parent;
+          }
+
+          const isSelfClipped = isClippedByAncestor(node, frame);
 
           const name = node.name.toLowerCase().trim();
           const isTable = tableKeys.some((k: string) => name.includes(k));
@@ -353,30 +347,37 @@ figma.ui.onmessage = async (msg) => {
 
           let isCapturedHere = false;
 
-          if (isCustomImageKey || isIconFontText) {
-            if (!targetImageNodes.includes(node)) targetImageNodes.push(node);
-            isCapturedHere = true;
-          }
-          else if (isBakedBoundary) {
-            if (!targetImageNodes.includes(node)) targetImageNodes.push(node);
-            isCapturedHere = true;
-            if (!extractNested) return;
+          // 노드 자체가 클리핑 영역 안에 유효하게 보일 때만 이미지 캡처 대상으로 등록
+          if (!isSelfClipped) {
+            if (isCustomImageKey || isIconFontText) {
+              if (!targetImageNodes.includes(node)) targetImageNodes.push(node);
+              isCapturedHere = true;
+            }
+            else if (isBakedBoundary) {
+              if (!targetImageNodes.includes(node)) targetImageNodes.push(node);
+              isCapturedHere = true;
+              if (!extractNested) return;
+            }
+
+            if ('children' in node && node.type !== 'BOOLEAN_OPERATION') {
+              if (!isCapturedHere && !hasCapturedParent) {
+                if (hasVisibleGraphic(node) || node.type === 'INSTANCE' || node.type === 'COMPONENT') {
+                  if (!targetImageNodes.includes(node)) { targetImageNodes.push(node); isCapturedHere = true; }
+                }
+              }
+            } else {
+              if (!hasCapturedParent && !isCapturedHere) {
+                if (hasVisibleGraphic(node) || node.type === 'BOOLEAN_OPERATION') {
+                  if (!targetImageNodes.includes(node)) { targetImageNodes.push(node); }
+                }
+              }
+            }
           }
 
+          // 자식 노드 순회는 부모의 클리핑 여부와 무관하게 계속 탐색 (화면 안에 보이는 내부 UI 요소 누락 방지)
           if ('children' in node && node.type !== 'BOOLEAN_OPERATION') {
-            if (!isCapturedHere && !hasCapturedParent) {
-              if (hasVisibleGraphic(node) || node.type === 'INSTANCE' || node.type === 'COMPONENT') {
-                if (!targetImageNodes.includes(node)) { targetImageNodes.push(node); isCapturedHere = true; }
-              }
-            }
             for (const child of node.children) {
               collectImages(child, hasCapturedParent || isCapturedHere);
-            }
-          } else {
-            if (!hasCapturedParent && !isCapturedHere) {
-              if (hasVisibleGraphic(node) || node.type === 'BOOLEAN_OPERATION') {
-                if (!targetImageNodes.includes(node)) { targetImageNodes.push(node); }
-              }
             }
           }
         }
