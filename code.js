@@ -148,25 +148,90 @@ function checkIsBakedBoundary(node, boundaries) {
 }
 function isIconFontTextNode(node) {
     try {
-        const iconKeywords = ['fontawesome', 'material', 'icon', 'symbol', 'remix', 'phosphor'];
+        if (!node || node.removed)
+            return false;
+        const chars = node.characters || '';
+        // 1. 유니코드 Private Use Area (PUA) 및 특수 아이콘 기호 검사
+        // Font Awesome 및 대다수 아이콘 웹폰트는 유니코드 PUA 영역(0xE000~0xF8FF, 0xF0000 이상)에 글리프를 매핑합니다.
+        for (let i = 0; i < chars.length; i++) {
+            const code = chars.codePointAt(i) || 0;
+            // Basic PUA
+            if (code >= 0xe000 && code <= 0xf8ff)
+                return true;
+            // Supplementary PUA-A & PUA-B
+            if (code >= 0xf0000 && code <= 0xffffd)
+                return true;
+            if (code >= 0x100000 && code <= 0x10fffd)
+                return true;
+            // 딩뱃 및 특수 기호 (체크박스, 체크마크 등)
+            if ((code >= 0x2700 && code <= 0x27bf) || (code >= 0x2600 && code <= 0x26ff)) {
+                if (chars.trim().length <= 2)
+                    return true;
+            }
+        }
+        // 2. 폰트 패밀리 및 폰트 스타일 검사
+        const iconFontKeywords = [
+            'fontawesome', 'font-awesome', 'awesome', 'fa-', 'fa5', 'fa6', 'fapro', 'fafree',
+            'material', 'icon', 'symbol', 'remix', 'phosphor', 'feather', 'lucide',
+            'tabler', 'bootstrap', 'heroicon', 'ionicons', 'glyph', 'xeicon', 'lineawesome'
+        ];
+        const checkFont = (font) => {
+            if (!font || !font.family)
+                return false;
+            const family = font.family.toLowerCase().replace(/[\s\-_]/g, '');
+            const style = (font.style || '').toLowerCase().replace(/[\s\-_]/g, '');
+            const rawFamily = font.family.toLowerCase();
+            // 'fa'로 시작하는 폰트명 처리 (예: FA Solid, FA Pro, FA-Regular)
+            if (/^fa[\s\-_]/.test(rawFamily) || /^fa[0-9]/.test(rawFamily))
+                return true;
+            return iconFontKeywords.some(keyword => {
+                const cleanK = keyword.replace(/[\s\-_]/g, '');
+                return family.includes(cleanK) || style.includes(cleanK);
+            });
+        };
         if (node.fontName === figma.mixed) {
-            for (let i = 0; i < node.characters.length; i++) {
+            for (let i = 0; i < chars.length; i++) {
                 const font = node.getRangeFontName(i, i + 1);
-                if (font !== figma.mixed) {
-                    const family = font.family.toLowerCase().replace(/\s/g, '');
-                    if (iconKeywords.some(keyword => family.includes(keyword)))
-                        return true;
+                if (font !== figma.mixed && font && checkFont(font)) {
+                    return true;
                 }
             }
-            return false;
         }
-        else {
-            const fontName = node.fontName;
-            if (!fontName || !fontName.family)
-                return false;
-            const family = fontName.family.toLowerCase().replace(/\s/g, '');
-            return iconKeywords.some(keyword => family.includes(keyword));
+        else if (node.fontName) {
+            if (checkFont(node.fontName))
+                return true;
         }
+        // 3. 레이어 이름(Node Name) 및 부모 노드 이름 기반 아이콘 판정
+        const nodeName = (node.name || '').toLowerCase().trim();
+        const iconNameKeywords = ['icon', 'ico', 'fa-', 'fa_', 'glyph', 'symbol'];
+        const isIconName = iconNameKeywords.some(k => nodeName.includes(k));
+        // 4. 체크박스/체크 아이콘 (check, checked, checkbox) 및 합자(Ligature) 판정
+        const checkNameKeywords = ['check', 'checked', 'checkbox'];
+        const isCheckName = checkNameKeywords.some(k => nodeName.includes(k));
+        const trimmedText = chars.trim().toLowerCase();
+        const commonLigatures = [
+            'check', 'checked', 'check-square', 'check-circle', 'square-check', 'circle-check',
+            'checkbox', 'times', 'close', 'plus', 'minus', 'chevron-right', 'chevron-left',
+            'chevron-down', 'chevron-up', 'search', 'cog', 'gear', 'user', 'bell', 'star'
+        ];
+        const isLigatureWord = commonLigatures.includes(trimmedText);
+        // 레이어 이름이 아이콘/체크 관련이면서 글자 길이가 짧으면 아이콘으로 판정
+        if ((isIconName || isCheckName) && (chars.trim().length <= 15 || isLigatureWord)) {
+            return true;
+        }
+        // 부모 레이어 검사 (예: Checkbox 컴포넌트 내부의 체크 표시)
+        if (node.parent) {
+            const parentName = (node.parent.name || '').toLowerCase().trim();
+            const isParentIcon = iconNameKeywords.some(k => parentName.includes(k)) || checkNameKeywords.some(k => parentName.includes(k));
+            if (isParentIcon && (chars.trim().length <= 5 || isLigatureWord)) {
+                return true;
+            }
+        }
+        // Font Awesome 등에서 'check'와 같은 합자 단어 단독으로 사용된 경우
+        if (isLigatureWord && chars.trim().length <= 15) {
+            return true;
+        }
+        return false;
     }
     catch (_e) {
         return false;
@@ -313,6 +378,15 @@ figma.ui.onmessage = async (msg) => {
                     return imageKeys.some((k) => name.includes(k));
                 });
                 for (const node of allHiddenImageKeysNodes) {
+                    if (!targetImageNodes.includes(node))
+                        targetImageNodes.push(node);
+                }
+                const allIconNodes = frame.findAll(node => {
+                    if (!isNodeVisible(node, frame))
+                        return false;
+                    return node.type === 'TEXT' && isIconFontTextNode(node);
+                });
+                for (const node of allIconNodes) {
                     if (!targetImageNodes.includes(node))
                         targetImageNodes.push(node);
                 }
