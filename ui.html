@@ -1,4 +1,4 @@
-<script src="https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gitbrent/pptxgenjs@4.0.1/dist/pptxgen.bundle.js"></script>
 <style>
   body {
     font-family: sans-serif;
@@ -37,6 +37,10 @@
     border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     margin-bottom: 12px;
+  }
+
+  .panel:last-child {
+    margin-bottom: 0;
   }
 
   .panel-title {
@@ -79,6 +83,10 @@
     cursor: grab;
   }
 
+  .frame-item:last-child {
+    border-bottom: none;
+  }
+
   input[type="text"] {
     width: 100%;
     box-sizing: border-box;
@@ -99,6 +107,10 @@
     font-weight: bold;
     font-size: 13px;
     margin-top: 4px;
+  }
+
+  #exportBtn:hover {
+    background: #007BE5;
   }
 
   #exportBtn:disabled {
@@ -139,6 +151,29 @@
     height: 100%;
     background: #0D99FF;
     transition: width 0.3s ease-out;
+  }
+
+  .info-box {
+    margin-top: 12px;
+    padding: 12px;
+    background: #E5F4FF;
+    border-radius: 6px;
+    border: 1px solid #BEE3FF;
+  }
+
+  .info-box-title {
+    font-size: 11px;
+    font-weight: bold;
+    color: #007BE5;
+    margin-bottom: 6px;
+  }
+
+  .info-box ul {
+    font-size: 10.5px;
+    color: #444;
+    margin: 0;
+    padding-left: 16px;
+    line-height: 1.55;
   }
 </style>
 
@@ -192,6 +227,15 @@
     <div id="progress-container">
       <div id="progress-bar"></div>
     </div>
+
+    <div class="info-box">
+      <div class="info-box-title">💡 맞춤형 가이드 안내</div>
+      <ul>
+        <li><b>슬라이드 배경색:</b> 피그마 프레임의 단색 채우기(Fill)가 PPT 슬라이드 배경색으로 자동 반영됩니다.</li>
+        <li><b>표(Table) 자동 변환:</b> <code>table_</code> 키워드가 포함된 프레임은 파워포인트 순정 표 객체로 생성됩니다.</li>
+        <li><b>키워드 매칭 규칙:</b> 레이어 이름에 해당 키워드가 포함되어 있으면 자동 매칭됩니다.</li>
+      </ul>
+    </div>
   </div>
 </div>
 
@@ -232,7 +276,6 @@
     progressContainer.style.display = 'none';
     btn.disabled = false;
 
-    // 알림 팝업 전송
     alert('PPT 변환 중 오류가 발생했습니다.\n\n' + errorMessage);
   }
 
@@ -310,6 +353,7 @@
           pptx.defineLayout({ name: 'L' + i, width: slideW, height: slideH });
           let slide = pptx.addSlide({ layout: 'L' + i });
 
+          // [슬라이드 배경색 적용]
           const validColor = (sData.backgroundColor && /^[0-9A-FA-F]{6}$/.test(sData.backgroundColor))
             ? sData.backgroundColor
             : 'FFFFFF';
@@ -329,7 +373,7 @@
                     const cellObj = cell || {};
                     const opts = cellObj.options || {};
                     return {
-                      text: cellObj.text || '',
+                      text: sanitizeXmlText(cellObj.text || ''),
                       options: {
                         fill: opts.fill || 'FFFFFF',
                         valign: opts.valign || 'middle',
@@ -361,11 +405,36 @@
                   paraSpaceBefore: 0,
                   paraSpaceAfter: 0
                 };
-                if (typeof el.lhMultiple === 'number' && !isNaN(el.lhMultiple) && el.lhMultiple > 0) {
+                if (typeof el.lhMultiple === 'number' && !isNaN(el.lhMultiple) && isFinite(el.lhMultiple) && el.lhMultiple > 0) {
                   textOptions.lineSpacingMultiple = el.lhMultiple;
+                } else {
+                  textOptions.lineSpacingMultiple = 1.0;
                 }
 
-                slide.addText(el.textChunks, textOptions);
+                // [안전 가드] 밑줄 옵션이 single 또는 boolean일 때 ECMA-376 DrawingML 표준인 'sng'로 강제 정규화
+                const safeFormattedChunks = el.textChunks.map(chunk => {
+                  let safeUnderline = false;
+                  if (chunk.options && chunk.options.underline) {
+                    if (typeof chunk.options.underline === 'object' && chunk.options.underline.style) {
+                      const s = chunk.options.underline.style === 'single' ? 'sng' : chunk.options.underline.style;
+                      safeUnderline = { style: s };
+                    } else if (typeof chunk.options.underline === 'string') {
+                      const s = chunk.options.underline === 'single' ? 'sng' : chunk.options.underline;
+                      safeUnderline = { style: s };
+                    } else {
+                      safeUnderline = { style: 'sng' };
+                    }
+                  }
+                  return {
+                    text: chunk.text,
+                    options: {
+                      ...chunk.options,
+                      underline: safeUnderline
+                    }
+                  };
+                });
+
+                slide.addText(safeFormattedChunks, textOptions);
               }
             } catch (elemErr) {
               console.warn("Element render skipped:", el.type, elemErr);
@@ -376,7 +445,6 @@
         const rawName = document.getElementById('opt-file-name').value || 'Export';
         const cleanFileName = rawName.replace(/[/\\?%*:|"<>]/g, '_');
 
-        // 파일 쓰기 수행
         await pptx.writeFile({ fileName: cleanFileName.endsWith('.pptx') ? cleanFileName : cleanFileName + '.pptx' });
 
         statusEl.innerText = '변환 완료! 🎉';

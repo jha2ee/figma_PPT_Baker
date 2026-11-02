@@ -14,14 +14,14 @@ function getSafeBounds(node) {
         const renderBounds = node.absoluteRenderBounds ?? nodeBox;
         return { nodeBox, renderBounds: renderBounds || nodeBox };
     }
-    catch (err) {
+    catch (_err) {
         // 인스턴스 슬롯 노드가 파기되었거나 접근 불가 시 예외 처리
         return null;
     }
 }
 function sendSelectionToUI() {
     const selectedNodes = figma.currentPage.selection;
-    let frames = selectedNodes.filter(node => node.type === 'FRAME');
+    const frames = selectedNodes.filter(node => node.type === 'FRAME' && node.visible !== false);
     frames.sort((a, b) => {
         if (Math.abs(a.y - b.y) < 50)
             return a.x - b.x;
@@ -48,14 +48,14 @@ function isClippedByAncestor(node, rootFrame) {
                 if (anyAncestor.clipsContent === true)
                     hasClip = true;
             }
-            catch (e) { }
+            catch (_e) { /* ignore */ }
             // 2. 인스턴스인 경우 mainComponent의 clipsContent 확인
             if (!hasClip && anyAncestor.type === 'INSTANCE' && anyAncestor.mainComponent) {
                 try {
                     if (anyAncestor.mainComponent.clipsContent === true)
                         hasClip = true;
                 }
-                catch (e) { }
+                catch (_e) { /* ignore */ }
             }
             if (hasClip) {
                 const clipBox = anyAncestor.absoluteBoundingBox ?? {
@@ -108,7 +108,7 @@ function isClippedByAncestor(node, rootFrame) {
         }
         return false;
     }
-    catch (err) {
+    catch (_err) {
         return false;
     }
 }
@@ -168,7 +168,7 @@ function isIconFontTextNode(node) {
             return iconKeywords.some(keyword => family.includes(keyword));
         }
     }
-    catch (e) {
+    catch (_e) {
         return false;
     }
 }
@@ -180,8 +180,8 @@ figma.ui.onmessage = async (msg) => {
             const textKeys = textKeywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
             const imageKeys = imageKeywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
             const tableKeys = tableKeywords ? tableKeywords.map((k) => k.trim().toLowerCase()).filter(Boolean) : [];
-            const allSelectedFrames = figma.currentPage.selection.filter(node => node.type === 'FRAME');
-            let initialFrames = orderedIds.map((id) => allSelectedFrames.find(f => f.id === id)).filter(Boolean);
+            const allSelectedFrames = figma.currentPage.selection.filter(node => node.type === 'FRAME' && node.visible !== false);
+            const initialFrames = orderedIds.map((id) => allSelectedFrames.find(f => f.id === id)).filter(Boolean);
             const frames = initialFrames.filter(frame => {
                 const hasVisibleText = frame.findAll(node => node.type === 'TEXT' && isNodeVisible(node, frame)).length > 0;
                 const hasVisibleImages = frame.children.some(child => isNodeVisible(child, frame));
@@ -334,7 +334,7 @@ figma.ui.onmessage = async (msg) => {
                             let fillColor = 'FFFFFF';
                             let borders = [{ pt: 0, color: 'FFFFFF' }, { pt: 0, color: 'FFFFFF' }, { pt: 0, color: 'FFFFFF' }, { pt: 0, color: 'FFFFFF' }];
                             if ('fills' in cell && Array.isArray(cell.fills) && cell.fills.length > 0) {
-                                const fill = cell.fills.find(f => f.type === 'SOLID' && f.visible !== false);
+                                const fill = cell.fills.find((f) => f.type === 'SOLID' && f.visible !== false);
                                 if (fill) {
                                     const toHex = (c) => { const hex = Math.round(c * 255).toString(16); return hex.length === 1 ? '0' + hex : hex; };
                                     fillColor = (toHex(fill.color.r) + toHex(fill.color.g) + toHex(fill.color.b)).toUpperCase();
@@ -385,7 +385,7 @@ figma.ui.onmessage = async (msg) => {
                     const bounds = getSafeBounds(node);
                     if (!bounds)
                         continue;
-                    const { nodeBox, renderBounds } = bounds;
+                    const { renderBounds } = bounds;
                     if (renderBounds.width <= 0.1 || renderBounds.height <= 0.1)
                         continue;
                     const innerNodesToHide = [];
@@ -404,7 +404,7 @@ figma.ui.onmessage = async (msg) => {
                             });
                             innerNodesToHide.push(...found);
                         }
-                        catch (e) { }
+                        catch (_e) { /* ignore */ }
                     }
                     const innerOpacityMap = new Map();
                     for (const innerNode of innerNodesToHide) {
@@ -413,7 +413,7 @@ figma.ui.onmessage = async (msg) => {
                                 innerOpacityMap.set(innerNode, innerNode.opacity);
                                 innerNode.opacity = 0;
                             }
-                            catch (e) { }
+                            catch (_e) { /* ignore */ }
                         }
                     }
                     try {
@@ -437,7 +437,7 @@ figma.ui.onmessage = async (msg) => {
                                 try {
                                     innerNode.opacity = innerOpacityMap.get(innerNode) ?? 1;
                                 }
-                                catch (e) { }
+                                catch (_e) { /* ignore */ }
                             }
                         }
                     }
@@ -457,7 +457,7 @@ figma.ui.onmessage = async (msg) => {
                             isDesc = true;
                         currNode = currNode.parent;
                     }
-                    let autoWrap = node.textAutoResize !== 'WIDTH_AND_HEIGHT';
+                    const autoWrap = node.textAutoResize !== 'WIDTH_AND_HEIGHT';
                     let align = 'left';
                     if (node.textAlignHorizontal === 'CENTER')
                         align = 'center';
@@ -482,6 +482,9 @@ figma.ui.onmessage = async (msg) => {
                         }
                     }
                     let lhMultiple = figmaLh / 1.2;
+                    if (!isFinite(lhMultiple) || isNaN(lhMultiple) || lhMultiple <= 0) {
+                        lhMultiple = 1.0;
+                    }
                     const textChunks = [];
                     const chars = node.characters;
                     const toHex2 = (c) => { const hex = Math.round(c * 255).toString(16); return hex.length === 1 ? '0' + hex : hex; };
@@ -518,11 +521,12 @@ figma.ui.onmessage = async (msg) => {
                             if (charDeco !== figma.mixed) {
                                 if (charDeco === 'STRIKETHROUGH')
                                     charStrike = true;
+                                // [스키마 버그 완벽 수정] 파워포인트 DrawingML 규격은 u="sng" 이어야 함 ("single" 방지)
                                 if (charDeco === 'UNDERLINE')
-                                    charUnderline = { style: 'single' };
+                                    charUnderline = { style: 'sng' };
                             }
                         }
-                        catch (e) { }
+                        catch (_e) { /* ignore */ }
                         return {
                             color: charColor,
                             bold: charBold,
@@ -537,6 +541,8 @@ figma.ui.onmessage = async (msg) => {
                     const sanitize = (ch) => {
                         if (ch === '\u2028' || ch === '\u2029')
                             return '\n';
+                        // XML 유효 범위 밖의 비표준 제어 문자 필터링
+                        // eslint-disable-next-line no-control-regex
                         ch = ch.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F]/g, '');
                         if (ch === '<')
                             return '＜';
