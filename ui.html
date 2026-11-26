@@ -205,7 +205,7 @@
 
     <div class="panel">
       <div class="panel-title">5. 순정 표(Table)로 묶어낼 레이어 이름</div>
-      <input type="text" id="opt-table-keywords" value="table_, grid" placeholder="예: table_">
+      <input type="text" id="opt-table-keywords" value="table, grid" placeholder="예: table, grid">
     </div>
 
     <div class="panel">
@@ -372,24 +372,51 @@
                   return row.map(cell => {
                     const cellObj = cell || {};
                     const opts = cellObj.options || {};
+                    const cellOptions = {
+                      fill: opts.fill || 'FFFFFF',
+                      valign: opts.valign || 'middle',
+                      align: opts.align || 'left',
+                      fontSize: typeof opts.fontSize === 'number' ? opts.fontSize : 10,
+                      color: opts.color || '000000',
+                      bold: opts.bold === true,
+                      margin: typeof opts.margin === 'number' ? opts.margin : 2,
+                      border: Array.isArray(opts.border) ? opts.border : [
+                        { type: 'none' },
+                        { type: 'none' },
+                        { type: 'none' },
+                        { type: 'none' }
+                      ]
+                    };
+                    if (typeof opts.colspan === 'number' && opts.colspan > 1) {
+                      cellOptions.colspan = opts.colspan;
+                    }
+                    if (typeof opts.rowspan === 'number' && opts.rowspan > 1) {
+                      cellOptions.rowspan = opts.rowspan;
+                    }
                     return {
                       text: sanitizeXmlText(cellObj.text || ''),
-                      options: {
-                        fill: opts.fill || 'FFFFFF',
-                        valign: opts.valign || 'middle',
-                        margin: typeof opts.margin === 'number' ? opts.margin : 2,
-                        border: Array.isArray(opts.border) ? opts.border : [
-                          { pt: 0, color: 'FFFFFF' },
-                          { pt: 0, color: 'FFFFFF' },
-                          { pt: 0, color: 'FFFFFF' },
-                          { pt: 0, color: 'FFFFFF' }
-                        ]
-                      }
+                      options: cellOptions
                     };
                   });
                 });
 
-                slide.addTable(sanitizedRows, { x: el.x + '%', y: el.y + '%', w: el.w + '%', h: el.h + '%' });
+                const tableOptions = { x: el.x + '%', y: el.y + '%', w: el.w + '%', h: el.h + '%' };
+                if (Array.isArray(el.colWidthsPx) && el.colWidthsPx.length > 0 && el.colWidthsPx.every(w => w > 0)) {
+                  const totalColPx = el.colWidthsPx.reduce((a, b) => a + b, 0);
+                  const tableWInches = (el.w / 100) * slideW;
+                  if (totalColPx > 0 && tableWInches > 0) {
+                    tableOptions.colW = el.colWidthsPx.map(w => (w / totalColPx) * tableWInches);
+                  }
+                }
+                if (Array.isArray(el.rowHeightsPx) && el.rowHeightsPx.length > 0 && el.rowHeightsPx.every(h => h > 0)) {
+                  const totalRowPx = el.rowHeightsPx.reduce((a, b) => a + b, 0);
+                  const tableHInches = (el.h / 100) * slideH;
+                  if (totalRowPx > 0 && tableHInches > 0) {
+                    tableOptions.rowH = el.rowHeightsPx.map(h => (h / totalRowPx) * tableHInches);
+                  }
+                }
+
+                slide.addTable(sanitizedRows, tableOptions);
               }
               else if (el.type === 'text' && Array.isArray(el.textChunks) && el.textChunks.length > 0) {
                 const textOptions = {

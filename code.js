@@ -272,12 +272,51 @@ figma.ui.onmessage = async (msg) => {
                     }
                 }
                 assignZIndex(frame);
-                const targetTableNodes = frame.findAll(node => {
+                const isTableContainerCandidate = (node) => {
                     if (!isNodeVisible(node, frame))
                         return false;
+                    if (!('children' in node) || node.type === 'BOOLEAN_OPERATION')
+                        return false;
                     const name = node.name.toLowerCase().trim();
-                    return tableKeys.some((k) => name.includes(k));
+                    if (!tableKeys.some((k) => name.includes(k)))
+                        return false;
+                    // 보이는 컨테이너 형태의 자식 행이 1개 이상 있어야 표 후보로 인정
+                    const visibleRows = node.children.filter((n) => ('children' in n) && n.type !== 'BOOLEAN_OPERATION' && isNodeVisible(n, frame));
+                    return visibleRows.length > 0;
+                };
+                const rawTableCandidates = frame.findAll(node => isTableContainerCandidate(node));
+                // 1) 래퍼(예: Table Wrapper) 내부에 실제 표 컨테이너가 따로 있고,
+                //    래퍼 자체에 일반 텍스트 등 비-행 요소가 섞여 있으면 래퍼는 제외하고 안쪽 표를 선택
+                const filteredCandidates = rawTableCandidates.filter(candidate => {
+                    if (!('children' in candidate))
+                        return false;
+                    const hasInnerTableCandidate = rawTableCandidates.some(other => {
+                        if (other === candidate)
+                            return false;
+                        let p = other.parent;
+                        while (p && p !== frame) {
+                            if (p === candidate)
+                                return true;
+                            p = p.parent;
+                        }
+                        return false;
+                    });
+                    if (!hasInnerTableCandidate)
+                        return true;
+                    const hasNonRowChild = candidate.children.some((c) => isNodeVisible(c, frame) && !('children' in c));
+                    return !hasNonRowChild;
                 });
+                // 2) 최상위 확정 표 내부의 Table Row / Table Cell 등이 중복 등록되지 않도록 제거
+                const targetTableNodes = filteredCandidates.filter(candidate => {
+                    let p = candidate.parent;
+                    while (p && p !== frame) {
+                        if (filteredCandidates.includes(p))
+                            return false;
+                        p = p.parent;
+                    }
+                    return true;
+                });
+                const targetTableSet = new Set(targetTableNodes.map(n => n.id));
                 const targetTextNodes = frame.findAll(node => {
                     if (node.type !== 'TEXT')
                         return false;
@@ -294,7 +333,7 @@ figma.ui.onmessage = async (msg) => {
                             isDesc = true;
                         if (imageKeys.some((k) => pName.includes(k)))
                             inNumbering = true;
-                        if (tableKeys.some((k) => pName.includes(k)))
+                        if (targetTableSet.has(currNode.id))
                             inTable = true;
                         if (checkIsBakedBoundary(currNode, boundaries))
                             inBakedBoundary = true;
@@ -321,7 +360,7 @@ figma.ui.onmessage = async (msg) => {
                     }
                     const isSelfClipped = isClippedByAncestor(node, frame);
                     const name = node.name.toLowerCase().trim();
-                    const isTable = tableKeys.some((k) => name.includes(k));
+                    const isTable = targetTableSet.has(node.id);
                     if (isTable)
                         return;
                     const isIconFontText = node.type === 'TEXT' && isIconFontTextNode(node);
@@ -394,6 +433,83 @@ figma.ui.onmessage = async (msg) => {
                         targetImageNodes.push(node);
                 }
                 const elementsData = [];
+                const toHex2Char = (c) => {
+                    const v = Math.max(0, Math.min(255, Math.round(c * 255)));
+                    const hex = v.toString(16);
+                    return hex.length === 1 ? '0' + hex : hex;
+                };
+                const blendColorHex = (r, g, b, opacity, bgHex = 'FFFFFF') => {
+                    const a = typeof opacity === 'number' ? Math.max(0, Math.min(1, opacity)) : 1;
+                    if (a >= 0.99) {
+                        return (toHex2Char(r) + toHex2Char(g) + toHex2Char(b)).toUpperCase();
+                    }
+                    const bgR = parseInt(bgHex.slice(0, 2), 16) / 255;
+                    const bgG = parseInt(bgHex.slice(2, 4), 16) / 255;
+                    const bgB = parseInt(bgHex.slice(4, 6), 16) / 255;
+                    const outR = r * a + bgR * (1 - a);
+                    const outG = g * a + bgG * (1 - a);
+                    const outB = b * a + bgB * (1 - a);
+                    return (toHex2Char(outR) + toHex2Char(outG) + toHex2Char(outB)).toUpperCase();
+                };
+                const extractSolidFillHex = (node, fallback) => {
+                    if ('fills' in node && Array.isArray(node.fills) && node.fills.length > 0) {
+                        const fill = node.fills.find((f) => f.type === 'SOLID' && f.visible !== false && (f.opacity === undefined || f.opacity > 0));
+                        if (fill) {
+                            return blendColorHex(fill.color.r, fill.color.g, fill.color.b, fill.opacity ?? 1, fallback);
+                        }
+                    }
+                    return fallback;
+                };
+                const extractNodeBorders = (node, bgHex = 'FFFFFF') => {
+                    if (!('strokes' in node))
+                        return [null, null, null, null];
+                    const anyNode = node;
+                    if (!Array.isArray(anyNode.strokes) || anyNode.strokes.length === 0)
+                        return [null, null, null, null];
+                    const sPaint = anyNode.strokes.find((s) => s.type === 'SOLID' && s.visible !== false && (s.opacity === undefined || s.opacity > 0));
+                    if (!sPaint)
+                        return [null, null, null, null];
+                    const color = blendColorHex(sPaint.color.r, sPaint.color.g, sPaint.color.b, sPaint.opacity ?? 1, bgHex);
+                    const baseW = typeof anyNode.strokeWeight === 'number' ? anyNode.strokeWeight : 0;
+                    const topW = typeof anyNode.strokeTopWeight === 'number' ? anyNode.strokeTopWeight : baseW;
+                    const rightW = typeof anyNode.strokeRightWeight === 'number' ? anyNode.strokeRightWeight : baseW;
+                    const bottomW = typeof anyNode.strokeBottomWeight === 'number' ? anyNode.strokeBottomWeight : baseW;
+                    const leftW = typeof anyNode.strokeLeftWeight === 'number' ? anyNode.strokeLeftWeight : baseW;
+                    const toSide = (w) => {
+                        if (w <= 0)
+                            return null;
+                        return { pt: Math.max(0.5, Math.round(w * 0.75 * 100) / 100), color };
+                    };
+                    return [toSide(topW), toSide(rightW), toSide(bottomW), toSide(leftW)];
+                };
+                const clusterCoords = (coords, tol = 3) => {
+                    if (coords.length === 0)
+                        return [];
+                    const sorted = [...coords].sort((a, b) => a - b);
+                    const groups = [[sorted[0]]];
+                    for (let k = 1; k < sorted.length; k++) {
+                        const lastGroup = groups[groups.length - 1];
+                        if (sorted[k] - lastGroup[lastGroup.length - 1] <= tol) {
+                            lastGroup.push(sorted[k]);
+                        }
+                        else {
+                            groups.push([sorted[k]]);
+                        }
+                    }
+                    return groups.map(g => g.reduce((a, b) => a + b, 0) / g.length);
+                };
+                const nearestIndex = (edges, val) => {
+                    let bestIdx = 0;
+                    let bestDist = Infinity;
+                    for (let idx = 0; idx < edges.length; idx++) {
+                        const d = Math.abs(edges[idx] - val);
+                        if (d < bestDist) {
+                            bestDist = d;
+                            bestIdx = idx;
+                        }
+                    }
+                    return bestIdx;
+                };
                 for (const tableNode of targetTableNodes) {
                     if (isClippedByAncestor(tableNode, frame))
                         continue;
@@ -401,55 +517,257 @@ figma.ui.onmessage = async (msg) => {
                     if (!bounds)
                         continue;
                     const tBox = bounds.nodeBox;
-                    const tableRowsData = [];
-                    const rows = tableNode.children.filter(n => n.type === 'FRAME' || n.type === 'GROUP');
-                    for (const row of rows) {
-                        const rowCellsData = [];
-                        const cells = ('children' in row) ? row.children : [];
-                        for (const cell of cells) {
+                    const rows = tableNode.children.filter((n) => ('children' in n) && n.type !== 'BOOLEAN_OPERATION' && isNodeVisible(n, frame));
+                    if (rows.length === 0)
+                        continue;
+                    const tableBgHex = extractSolidFillHex(tableNode, backgroundColor || 'FFFFFF');
+                    const tableBorders = extractNodeBorders(tableNode, tableBgHex);
+                    const rowMeta = [];
+                    const allXEdges = [];
+                    for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+                        const row = rows[rIdx];
+                        const rowBounds = getSafeBounds(row);
+                        if (!rowBounds)
+                            continue;
+                        const rowBgHex = extractSolidFillHex(row, tableBgHex);
+                        const rowBorders = extractNodeBorders(row, rowBgHex);
+                        const rawCells = ('children' in row) ? row.children : [];
+                        const visibleCells = rawCells.filter((c) => isNodeVisible(c, frame));
+                        const parsedCells = [];
+                        for (const cell of visibleCells) {
+                            const cellBounds = getSafeBounds(cell);
+                            if (!cellBounds)
+                                continue;
+                            const cBox = cellBounds.nodeBox;
+                            allXEdges.push(cBox.x, cBox.x + cBox.width);
+                            const fillColor = extractSolidFillHex(cell, rowBgHex);
+                            const cellBorders = extractNodeBorders(cell, fillColor);
                             let cellText = '';
-                            let fillColor = 'FFFFFF';
-                            let borders = [{ pt: 0, color: 'FFFFFF' }, { pt: 0, color: 'FFFFFF' }, { pt: 0, color: 'FFFFFF' }, { pt: 0, color: 'FFFFFF' }];
-                            if ('fills' in cell && Array.isArray(cell.fills) && cell.fills.length > 0) {
-                                const fill = cell.fills.find((f) => f.type === 'SOLID' && f.visible !== false);
-                                if (fill) {
-                                    const toHex = (c) => { const hex = Math.round(c * 255).toString(16); return hex.length === 1 ? '0' + hex : hex; };
-                                    fillColor = (toHex(fill.color.r) + toHex(fill.color.g) + toHex(fill.color.b)).toUpperCase();
-                                }
+                            let fontSize = 10;
+                            let textColor = '000000';
+                            let isBold = false;
+                            let align = 'left';
+                            const visibleTextNodes = [];
+                            if (cell.type === 'TEXT') {
+                                if (!isIconFontTextNode(cell))
+                                    visibleTextNodes.push(cell);
                             }
-                            if ('strokeWeight' in cell) {
-                                const anyCell = cell;
-                                const hasStrokes = Array.isArray(anyCell.strokes) && anyCell.strokes.length > 0 && anyCell.strokes[0].visible !== false;
-                                let strokeColor = 'CCCCCC';
-                                if (hasStrokes) {
-                                    const sPaint = anyCell.strokes[0];
-                                    if (sPaint.type === 'SOLID') {
-                                        const toHex = (c) => { const hex = Math.round(c * 255).toString(16); return hex.length === 1 ? '0' + hex : hex; };
-                                        strokeColor = (toHex(sPaint.color.r) + toHex(sPaint.color.g) + toHex(sPaint.color.b)).toUpperCase();
+                            else if ('findAll' in cell) {
+                                const foundTexts = cell.findAll((n) => n.type === 'TEXT' && isNodeVisible(n, frame) && !isIconFontTextNode(n));
+                                visibleTextNodes.push(...foundTexts);
+                            }
+                            if (visibleTextNodes.length > 0) {
+                                cellText = visibleTextNodes.map(t => (t.characters || '').trim()).filter(Boolean).join('\n');
+                                const firstT = visibleTextNodes[0];
+                                try {
+                                    if (firstT.fontSize !== figma.mixed && typeof firstT.fontSize === 'number') {
+                                        fontSize = Math.max(6, Math.round(firstT.fontSize * 0.75 * 100) / 100);
                                     }
+                                    else if (firstT.characters.length > 0) {
+                                        const rSize = firstT.getRangeFontSize(0, 1);
+                                        if (rSize !== figma.mixed && typeof rSize === 'number') {
+                                            fontSize = Math.max(6, Math.round(rSize * 0.75 * 100) / 100);
+                                        }
+                                    }
+                                    const tFills = firstT.fills !== figma.mixed ? firstT.fills : (firstT.characters.length > 0 ? firstT.getRangeFills(0, 1) : []);
+                                    if (Array.isArray(tFills)) {
+                                        const tFill = tFills.find((f) => f.type === 'SOLID' && f.visible !== false);
+                                        if (tFill) {
+                                            textColor = blendColorHex(tFill.color.r, tFill.color.g, tFill.color.b, tFill.opacity ?? 1, fillColor);
+                                        }
+                                    }
+                                    const tFont = firstT.fontName !== figma.mixed ? firstT.fontName : (firstT.characters.length > 0 ? firstT.getRangeFontName(0, 1) : null);
+                                    if (tFont && tFont !== figma.mixed) {
+                                        const st = (tFont.style || '').toLowerCase();
+                                        if (st.includes('bold') || st.includes('black') || st.includes('semibold'))
+                                            isBold = true;
+                                    }
+                                    if (firstT.textAlignHorizontal === 'CENTER')
+                                        align = 'center';
+                                    else if (firstT.textAlignHorizontal === 'RIGHT')
+                                        align = 'right';
                                 }
-                                borders = [
-                                    { pt: anyCell.strokeTopWeight > 0 ? anyCell.strokeTopWeight : 0, color: anyCell.strokeTopWeight > 0 ? strokeColor : 'FFFFFF' },
-                                    { pt: anyCell.strokeRightWeight > 0 ? anyCell.strokeRightWeight : 0, color: anyCell.strokeRightWeight > 0 ? strokeColor : 'FFFFFF' },
-                                    { pt: anyCell.strokeBottomWeight > 0 ? anyCell.strokeBottomWeight : 0, color: anyCell.strokeBottomWeight > 0 ? strokeColor : 'FFFFFF' },
-                                    { pt: anyCell.strokeLeftWeight > 0 ? anyCell.strokeLeftWeight : 0, color: anyCell.strokeLeftWeight > 0 ? strokeColor : 'FFFFFF' }
-                                ];
+                                catch (_e) { /* ignore */ }
                             }
-                            const textNode = ('findAll' in cell) ? cell.findAll((n) => n.type === 'TEXT')[0] : null;
-                            if (textNode)
-                                cellText = textNode.characters || '';
-                            rowCellsData.push({
+                            parsedCells.push({
+                                rStart: rowMeta.length,
+                                cStart: 0,
+                                rowspan: 1,
+                                colspan: 1,
+                                x1: cBox.x,
+                                x2: cBox.x + cBox.width,
+                                y1: cBox.y,
+                                y2: cBox.y + cBox.height,
                                 text: cellText,
-                                options: { fill: fillColor, border: borders, margin: 2, valign: 'middle' }
+                                fill: fillColor,
+                                fontSize,
+                                color: textColor,
+                                bold: isBold,
+                                align,
+                                borders: cellBorders
                             });
                         }
-                        if (rowCellsData.length > 0)
-                            tableRowsData.push(rowCellsData);
+                        if (parsedCells.length > 0) {
+                            rowMeta.push({
+                                y1: rowBounds.nodeBox.y,
+                                y2: rowBounds.nodeBox.y + rowBounds.nodeBox.height,
+                                bgHex: rowBgHex,
+                                borders: rowBorders,
+                                cells: parsedCells
+                            });
+                        }
                     }
+                    if (rowMeta.length === 0 || allXEdges.length < 2)
+                        continue;
+                    // 2단계: 기준 열 경계(colEdges) 및 행 경계(rowEdges) 산출
+                    const colEdges = clusterCoords(allXEdges, 3);
+                    const numCols = colEdges.length - 1;
+                    const numRows = rowMeta.length;
+                    if (numCols <= 0)
+                        continue;
+                    const colWidthsPx = [];
+                    for (let c = 0; c < numCols; c++) {
+                        colWidthsPx.push(Math.max(1, colEdges[c + 1] - colEdges[c]));
+                    }
+                    const rowHeightsPx = rowMeta.map(rm => Math.max(1, rm.y2 - rm.y1));
+                    const rowEdges = [rowMeta[0].y1, ...rowMeta.map(rm => rm.y2)];
+                    // 3단계: 그리드 매핑(colspan / rowspan 계산) 및 3단계 테두리 상속(Cell <- Row <- Table)
+                    const grid = Array.from({ length: numRows }, () => Array(numCols).fill(null));
+                    const cellAtOrigin = Array.from({ length: numRows }, () => Array(numCols).fill(null));
+                    for (let r = 0; r < numRows; r++) {
+                        const rm = rowMeta[r];
+                        for (const cell of rm.cells) {
+                            const cStart = Math.min(numCols - 1, Math.max(0, nearestIndex(colEdges, cell.x1)));
+                            const cEndRaw = nearestIndex(colEdges, cell.x2);
+                            const cEnd = Math.min(numCols, Math.max(cStart + 1, cEndRaw));
+                            const colspan = cEnd - cStart;
+                            let rEnd = r + 1;
+                            while (rEnd < numRows && cell.y2 > rowEdges[rEnd] + 3) {
+                                rEnd++;
+                            }
+                            const rowspan = Math.max(1, rEnd - r);
+                            cell.rStart = r;
+                            cell.cStart = cStart;
+                            cell.colspan = colspan;
+                            cell.rowspan = rowspan;
+                            // 3단계 테두리 상속: Cell -> Row -> Table 외곽
+                            const isTopEdge = r === 0;
+                            const isBottomEdge = (r + rowspan) >= numRows;
+                            const isLeftEdge = cStart === 0;
+                            const isRightEdge = (cStart + colspan) >= numCols;
+                            cell.borders = [
+                                cell.borders[0] ?? rm.borders[0] ?? (isTopEdge ? tableBorders[0] : null),
+                                cell.borders[1] ?? (isRightEdge ? (rm.borders[1] ?? tableBorders[1]) : null),
+                                cell.borders[2] ?? rowMeta[Math.min(numRows - 1, r + rowspan - 1)].borders[2] ?? (isBottomEdge ? tableBorders[2] : null),
+                                cell.borders[3] ?? (isLeftEdge ? (rm.borders[3] ?? tableBorders[3]) : null)
+                            ];
+                            // 이미 점유된 위치와 충돌하지 않을 때만 배치
+                            let canPlace = true;
+                            for (let rr = r; rr < r + rowspan && rr < numRows; rr++) {
+                                for (let cc = cStart; cc < cStart + colspan && cc < numCols; cc++) {
+                                    if (grid[rr][cc] !== null)
+                                        canPlace = false;
+                                }
+                            }
+                            if (canPlace) {
+                                cellAtOrigin[r][cStart] = cell;
+                                for (let rr = r; rr < r + rowspan && rr < numRows; rr++) {
+                                    for (let cc = cStart; cc < cStart + colspan && cc < numCols; cc++) {
+                                        grid[rr][cc] = cell;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // 4단계: 인접 셀 간 공유 경계선 동기화 (한쪽의 none이 인접 셀의 선을 지우는 OOXML 충돌 방지)
+                    for (let r = 0; r < numRows; r++) {
+                        for (let c = 0; c < numCols; c++) {
+                            const cur = grid[r][c];
+                            if (!cur)
+                                continue;
+                            // 오른쪽 인접 셀과 공유 경계 동기화
+                            if (c + 1 < numCols) {
+                                const right = grid[r][c + 1];
+                                if (right && right !== cur) {
+                                    const shared = cur.borders[1] ?? right.borders[3];
+                                    if (shared) {
+                                        cur.borders[1] = shared;
+                                        right.borders[3] = shared;
+                                    }
+                                }
+                            }
+                            // 아래쪽 인접 셀과 공유 경계 동기화
+                            if (r + 1 < numRows) {
+                                const down = grid[r + 1][c];
+                                if (down && down !== cur) {
+                                    const shared = cur.borders[2] ?? down.borders[0];
+                                    if (shared) {
+                                        cur.borders[2] = shared;
+                                        down.borders[0] = shared;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // 5단계: PptxGenJS 규격에 맞는 행 배열 생성 (병합으로 덮인 슬롯은 생략)
+                    const formatBorder = (b) => (b ? { pt: b.pt, color: b.color } : { type: 'none' });
+                    const tableRowsData = [];
+                    for (let r = 0; r < numRows; r++) {
+                        const rowCellsData = [];
+                        for (let c = 0; c < numCols; c++) {
+                            const originCell = cellAtOrigin[r][c];
+                            if (originCell) {
+                                const cellOpts = {
+                                    fill: originCell.fill,
+                                    border: originCell.borders.map(formatBorder),
+                                    margin: 2,
+                                    valign: 'middle',
+                                    align: originCell.align,
+                                    fontSize: originCell.fontSize,
+                                    color: originCell.color,
+                                    bold: originCell.bold
+                                };
+                                if (originCell.colspan > 1)
+                                    cellOpts.colspan = originCell.colspan;
+                                if (originCell.rowspan > 1)
+                                    cellOpts.rowspan = originCell.rowspan;
+                                rowCellsData.push({ text: originCell.text, options: cellOpts });
+                            }
+                            else if (grid[r][c] === null) {
+                                // 어떤 셀로도 채워지지 않은 빈 칸만 투명 빈 셀로 패딩
+                                const rm = rowMeta[r];
+                                const fallbackBorders = [
+                                    rm.borders[0] ?? (r === 0 ? tableBorders[0] : null),
+                                    c === numCols - 1 ? (rm.borders[1] ?? tableBorders[1]) : null,
+                                    rm.borders[2] ?? (r === numRows - 1 ? tableBorders[2] : null),
+                                    c === 0 ? (rm.borders[3] ?? tableBorders[3]) : null
+                                ];
+                                rowCellsData.push({
+                                    text: '',
+                                    options: {
+                                        fill: rm.bgHex,
+                                        border: fallbackBorders.map(formatBorder),
+                                        margin: 2,
+                                        valign: 'middle',
+                                        fontSize: 10,
+                                        color: '000000'
+                                    }
+                                });
+                            }
+                            // grid[r][c] !== null && !originCell 인 경우는 병합으로 덮인 칸이므로 PptxGenJS 규격상 생략
+                        }
+                        if (rowCellsData.length > 0) {
+                            tableRowsData.push(rowCellsData);
+                        }
+                    }
+                    if (tableRowsData.length === 0)
+                        continue;
                     elementsData.push({
                         type: 'table',
                         zIndex: zIndexMap.get(tableNode.id) || 0,
                         rows: tableRowsData,
+                        colWidthsPx: colWidthsPx,
+                        rowHeightsPx: rowHeightsPx,
                         x: ((tBox.x - frameBox.x) / frame.width) * 100,
                         y: ((tBox.y - frameBox.y) / frame.height) * 100,
                         w: (tBox.width / frame.width) * 100,
@@ -476,6 +794,8 @@ figma.ui.onmessage = async (msg) => {
                                 if (targetImageNodes.includes(inner))
                                     return true;
                                 if (targetTextNodes.includes(inner))
+                                    return true;
+                                if (targetTableSet.has(inner.id))
                                     return true;
                                 return false;
                             });
